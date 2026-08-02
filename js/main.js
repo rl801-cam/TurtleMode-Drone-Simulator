@@ -3,21 +3,23 @@
 // The ?v= tags are cache busters, matching the one on style.css. Browsers cache ES modules
 // aggressively, so without them an edited module can keep running from cache against fresh
 // HTML. Bump every one of these (and the two in index.html) together after changing any file.
-import { Renderer } from './renderer.js?v=11';
-import { PhysicsEngine } from './physics.js?v=11';
-import { InputHandler } from './input.js?v=11';
-import { UIHandler } from './ui.js?v=11';
+import { Renderer } from './renderer.js?v=12';
+import { PhysicsEngine } from './physics.js?v=12';
+import { InputHandler } from './input.js?v=12';
+import { UIHandler } from './ui.js?v=12';
+import { AudioEngine } from './audio.js?v=12';
 
 // Shown in the launch menu and logged on boot. index.html itself carries no cache buster, so a
 // browser holding a stale copy of it will keep loading the old ?v= modules and none of the tags
 // above will help. If this does not match the newest version, the page needs a hard reload.
-const BUILD = 'v11';
+const BUILD = 'v12';
 
 class Simulator {
     constructor() {
         this.renderer = new Renderer('sim-container');
         this.physics = new PhysicsEngine();
         this.input = new InputHandler();
+        this.audio = new AudioEngine();
         
         // Register collision check callback to evaluate inside the physics sub-step.
         // The physics engine drives the radius - it queries several contact spheres per sub-step.
@@ -60,6 +62,18 @@ class Simulator {
             this.fpsLimit = parseInt(e.target.value, 10) || 60;
         });
 
+        // Motor audio toggle
+        const audioToggle = document.getElementById('audio-toggle');
+        const audioEnabled = localStorage.getItem('audioEnabled') !== 'false';
+        this.audio.setEnabled(audioEnabled);
+        if (audioToggle) {
+            audioToggle.checked = audioEnabled;
+            audioToggle.addEventListener('change', (e) => {
+                this.audio.setEnabled(e.target.checked);
+                localStorage.setItem('audioEnabled', e.target.checked);
+            });
+        }
+
         // Listen for ESC to pause, and R to reset
         window.addEventListener('keydown', (e) => {
             console.log("Key pressed:", e.key, "State:", this.state, "Active Element:", document.activeElement ? document.activeElement.tagName : 'none');
@@ -89,6 +103,10 @@ class Simulator {
     }
 
     async start(mapChoice) {
+        // Runs synchronously inside the Start button's click handler, which is the user gesture
+        // the browser requires before it will let an AudioContext produce sound.
+        this.audio.start();
+
         this.state = 'PLAYING';
         this.lastTime = performance.now();
         this.renderer.resetCamera();
@@ -97,6 +115,7 @@ class Simulator {
 
     pause() {
         this.state = 'PAUSED';
+        this.audio.silence();
         this.ui.showPauseMenu();
     }
 
@@ -115,6 +134,7 @@ class Simulator {
 
     exit() {
         this.physics.reset();
+        this.audio.silence();
         this.state = 'MENU';
         // Reset camera lookat for menu
         this.renderer.camera.lookAt(0, 0, 0);
@@ -166,6 +186,9 @@ class Simulator {
 
             // 6. Aim the camera (no-op in FPV, where the camera rides on the drone)
             this.renderer.updateCamera();
+
+            // 7. Motor tone follows the thrust command
+            this.audio.update(axes.throttle, armed);
         } else if (this.state === 'MENU') {
             // In menu, we can still slowly rotate the camera around the drone to look nice
             const time = now * 0.0005;
@@ -174,7 +197,7 @@ class Simulator {
             this.renderer.camera.lookAt(0, 0, 0);
         }
 
-        // 7. Render Frame
+        // 8. Render Frame
         this.renderer.render();
     }
 }
