@@ -15,6 +15,9 @@
 //      or yawing spreads the motors apart and the sound audibly works - exactly as a real quad
 //      wavers through a manoeuvre. At a steady hover a small fixed spread keeps them beating.
 //   4. Brightness tracking RPM, via a lowpass that opens with throttle.
+//   5. Wind noise - air rushing over the airframe, driven by airspeed rather than by the motors.
+//      Distinct from the turbulence "wind" in physics.js, which is a disturbance torque; this is
+//      purely the sound of moving through air, and it is what makes speed audible.
 //
 // Everything is synthesised, so there are no samples to load.
 
@@ -30,6 +33,9 @@ export class AudioEngine {
         this.chopGain = null;
         this.noiseGain = null;
         this.noiseFilter = null;
+        this.airGain = null;
+        this.airFilter = null;
+        this.noiseBuffer = null;
         this.master = null;
 
         // Prop *rotation* rate. The audible pitch sits on the blade-pass harmonics above this.
@@ -52,6 +58,12 @@ export class AudioEngine {
 
         // Depth of the blade chop. 0.5 swings the noise between silence and full.
         this.chopDepth = 0.5;
+
+        // Wind noise. Full airflow roar arrives around racing speed; the curve is steeper than
+        // linear because air noise climbs sharply rather than fading in evenly.
+        this.maxAirGain = 0.14;
+        this.airReferenceSpeed = 30; // m/s (~108 km/h) for full-scale wind noise
+        this.airCurve = 1.5;
 
         // Exponential smoothing time constant. Stick input arrives in discrete frames, and
         // stepping the parameters straight to their new values clicks audibly.
@@ -77,8 +89,10 @@ export class AudioEngine {
             this.master.gain.value = 1;
             this.master.connect(this.ctx.destination);
 
+            this.noiseBuffer = this.createNoiseBuffer();
             this.buildTone();
             this.buildNoise();
+            this.buildAir();
         }
 
         if (this.ctx.state === 'suspended') this.ctx.resume();
@@ -112,13 +126,17 @@ export class AudioEngine {
         }
     }
 
-    buildNoise() {
-        // Two seconds of white noise on a loop is far past the point the repeat is audible
+    // Two seconds of white noise on a loop is far past the point the repeat is audible.
+    // Shared by the prop wash and the wind layers, played back at different offsets.
+    createNoiseBuffer() {
         const frames = Math.floor(this.ctx.sampleRate * 2);
         const buffer = this.ctx.createBuffer(1, frames, this.ctx.sampleRate);
         const data = buffer.getChannelData(0);
         for (let i = 0; i < frames; i++) data[i] = Math.random() * 2 - 1;
+        return buffer;
+    }
 
+    buildNoise() {
         this.noiseGain = this.ctx.createGain();
         this.noiseGain.gain.value = 0;
         this.noiseGain.connect(this.master);
@@ -136,7 +154,7 @@ export class AudioEngine {
         this.noiseFilter.connect(this.chopGain);
 
         const source = this.ctx.createBufferSource();
-        source.buffer = buffer;
+        source.buffer = this.noiseBuffer;
         source.loop = true;
         source.connect(this.noiseFilter);
         source.start();
@@ -158,6 +176,29 @@ export class AudioEngine {
 
             this.choppers.push(mod);
         }
+    }
+
+    buildAir() {
+        this.airGain = this.ctx.createGain();
+        this.airGain.gain.value = 0;
+        this.airGain.connect(this.master);
+
+        // Wide bandpass: airflow is broadband rather than pitched, and its centre climbs with
+        // speed as the flow gets more turbulent
+        this.airFilter = this.ctx.createBiquadFilter();
+        this.airFilter.type = 'bandpass';
+        this.airFilter.frequency.value = this.airBandFor(0);
+        this.airFilter.Q.value = 0.5;
+        this.airFilter.connect(this.airGain);
+
+        const source = this.ctx.createBufferSource();
+        source.buffer = this.noiseBuffer;
+        source.loop = true;
+        source.connect(this.airFilter);
+        // Started part-way into the shared buffer so it does not track the prop-wash source
+        // sample for sample, which would just sound like one louder noise layer
+        source.start(0, this.noiseBuffer.duration ? this.noiseBuffer.duration * 0.37 : 0.74);
+        this.airSource = source;
     }
 
     setEnabled(enabled) {
@@ -214,11 +255,26 @@ export class AudioEngine {
         return this.maxNoiseGain * Math.pow(level, 1.3);
     }
 
-    noiseBandFor(level) {
+// Normalised airspeed, 0..1. Unlike the motors this is not gated on arming: a disarmed drone
+    // falling out of the sky is still moving through air.
+    airLevel(speed) {
+        if (!Number.isFinite(speed) || speed <= 0) return 0;
+        return Math.min(1, speed / this.airReferenceSpeed);
+    }
+
+    airGainFor(level) {
+        return this.maxAirGain * Math.pow(level, this.airCurve);
+    }
+
+    airBandFor(level) {
+        return 400 + 1800 * level;
+    }
+
+        noiseBandFor(level) {
         return 600 + 2500 * level;
     }
 
-    update(axes, armed) {
+    update(axes, armed, speed) {
         if (!this.ctx || !this.enabled) return;
 
         const levels = this.motorLevels(axes, armed);
@@ -242,6 +298,11 @@ export class AudioEngine {
         this.toneFilter.frequency.setTargetAtTime(this.brightnessFor(mean), now, this.smoothing);
         this.noiseGain.gain.setTargetAtTime(this.noiseGainFor(mean), now, this.smoothing);
         this.noiseFilter.frequency.setTargetAtTime(this.noiseBandFor(mean), now, this.smoothing);
+
+        // Wind noise rides on how fast the airframe is actually moving, not on the throttle
+        const air = this.airLevel(speed);
+        this.airGain.gain.setTargetAtTime(this.airGainFor(air), now, this.smoothing);
+        this.airFilter.frequency.setTargetAtTime(this.airBandFor(air), now, this.smoothing);
     }
 
     // Fade out without touching the oscillators, so sound can come straight back on resume
@@ -250,5 +311,6 @@ export class AudioEngine {
         const now = this.ctx.currentTime;
         this.toneGain.gain.setTargetAtTime(0, now, this.smoothing);
         this.noiseGain.gain.setTargetAtTime(0, now, this.smoothing);
+        this.airGain.gain.setTargetAtTime(0, now, this.smoothing);
     }
 }

@@ -83,11 +83,16 @@ Each of these was found the hard way. They are load-bearing.
 8. **`updateConfig()` merges nested objects.** `{ wind: { roll: true } }` leaves pitch and yaw
    untouched — correct for the per-axis checkboxes, but a trap in tests and callers that assume a
    full replacement.
-9. **The AudioContext must be created from a user gesture.** It is started inside
+9. **Audio has two independent drivers.** Motor noise comes from the stick inputs and is gated
+    on arming; wind noise comes from `droneBody.velocity` and deliberately is not, since a
+    disarmed drone still falls through air. Do not collapse them onto one input.
+10. **The AudioContext must be created from a user gesture.** It is started inside
    `Simulator.start()`, which is reached synchronously from the Start button's click handler. Move
    it and audio silently never plays.
-10. **Wind is suppressed while the drone is touching a surface**, with a short grace period so
-    contact flicker on uneven map geometry does not let it back in.
+11. **Turbulence wind is suppressed while the drone is touching a surface**, with a short grace
+    period so contact flicker on uneven map geometry does not let it back in. Note the naming: the
+    *wind* in `physics.js` is a disturbance torque, while `air*` in `audio.js` is the sound of
+    moving through air. They are unrelated.
 
 ## Caching — read this before debugging "my change did nothing"
 
@@ -114,7 +119,8 @@ every tag and `BUILD` together after editing any module.
 6. **Line of Sight camera.** Fixed viewpoint near spawn that tracks the drone, with a visible
    airframe, distance readout, and `C` to toggle in flight.
 7. **Wind.** Low-pass filtered per-axis disturbance torque, suppressed on the ground.
-8. **Audio.** Synthesised chopped prop noise driven by the stick inputs.
+8. **Audio.** Synthesised chopped prop noise driven by the stick inputs, plus an airspeed-driven
+   wind layer so speed is audible on its own.
 
 ## Verification
 
@@ -145,7 +151,8 @@ most of them are exactly the kind of thing a well-meaning refactor quietly break
    floating or buried. Per-map spawn points fix both. No crash detection or auto-reset yet.
 6. **Angle / horizon mode.** Acro only; a self-levelling mode makes day one possible.
 7. **Audio distance.** In LOS mode a drone 50 m away is as loud as one at your feet. Attenuation
-   and high-frequency rolloff with distance would help considerably.
+   and high-frequency rolloff with distance would help considerably, and Doppler on the wind layer
+   would follow naturally.
 8. **Gates and lap timing**, then replay/ghost — the training loop the simulator is ultimately for.
 
 ---

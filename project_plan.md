@@ -107,6 +107,11 @@ chopped at blade-passage rate. Four layers:
   pitching or yawing spreads them apart and the sound audibly works through a manoeuvre. A small
   fixed spread keeps them beating at a steady hover.
 - **Brightness tracking RPM** — a lowpass opening from 500 Hz to 5.5 kHz.
+- **Wind noise** — air rushing over the airframe, driven by *airspeed* rather than by the motors,
+  so speed is audible independently of throttle. It fades in above a walking pace, climbs faster
+  than linear, saturates around 30 m/s, and its spectrum shifts from 400 Hz to 2.2 kHz. Unlike the
+  motors it is not gated on arming: a disarmed drone falling out of the sky still moves through
+  air. Distinct from the turbulence *Wind* in the launch menu, which is a disturbance torque.
 
 Prop rotation runs 55–260 Hz, putting the blade tone near 165–780 Hz and the chop at the same rate.
 Amplitude and frequency remain linear in the throttle command. Silent when disarmed or paused,
@@ -163,5 +168,6 @@ kind of assumption a reasonable-looking refactor silently breaks.
    `y = 0`. Per-map spawn points would fix both.
 6. **Angle / horizon mode.** Acro only at present; a self-levelling mode makes day one possible.
 7. **Audio distance.** In Line of Sight mode a drone 50 m away is as loud as one at your feet;
-   attenuation and high-frequency rolloff with distance would help considerably.
+   attenuation and high-frequency rolloff with distance would help considerably. Doppler on the
+   wind layer would be a natural extension.
 8. **Gates and lap timing**, then replay/ghost — the training loop the simulator is ultimately for.
