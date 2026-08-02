@@ -13,16 +13,16 @@ export class PhysicsEngine {
         // Configurable Drone Parameters
         this.params = {
             mass: 0.5, // kg
-            maxThrust: 35, // Newtons (Realistic TWR of 7:1)
-            drag: 0.2, // Linear & Angular dampening
-            restitution: 0.35, // How much energy a frame/prop strike gives back
-            friction: 0.5, // Coulomb friction coefficient at contact points
+            maxThrust: 25, // Newtons (TWR of ~5:1 at the default mass)
+            drag: 0.5, // Linear & Angular dampening
+            restitution: 0.2, // How much energy a frame/prop strike gives back
+            friction: 0.2, // Coulomb friction coefficient at contact points
             wind: {
                 // Gentle random torque per body axis, off until the pilot opts in
                 roll: false,
                 pitch: false,
                 yaw: false,
-                strength: 0.3 // 0..1, scaled by windMaxTorque below
+                strength: 0.1 // 0..1, scaled by windMaxTorque below
             },
             rates: {
                 roll: { center: 200, max: 600, expo: 0.5 },
@@ -123,7 +123,13 @@ export class PhysicsEngine {
         // Continuous collision detection. The sphere checks only see a surface within a contact
         // radius of where the sub-step *ended*, so anything moving further than this in one
         // sub-step could step straight over a wall. Above it, the travelled path is swept instead.
-        this.ccdThreshold = 0.08; // m per sub-step (~9.6 m/s at the 120 Hz sub-step rate)
+        //
+        // It must never exceed the smallest contact radius. A contact sphere sitting further
+        // than its radius from a surface is invisible to the sphere check, so a sub-step longer
+        // than that radius can start outside the check and land on the far side of the surface -
+        // where the closest-point normal points the wrong way and the solver pushes the drone
+        // further through. Capping travel at the radius makes crossing geometrically impossible.
+        this.ccdThreshold = Math.min(...this.contactPoints.map((cp) => cp.radius));
         // Seeded from the spawn position and kept valid from then on, so even the very first
         // sub-step has a path to sweep
         this._prevPosition = this.droneBody.position.clone();

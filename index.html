@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TurtleMode Simulator</title>
-    <link rel="stylesheet" href="css/style.css?v=5">
+    <link rel="stylesheet" href="css/style.css?v=6">
     <!-- Import maps for ES modules to load Three.js and Cannon-es cleanly -->
     <script type="importmap">
         {
@@ -93,20 +93,20 @@
                     <input type="range" id="cfg-mass" min="0.1" max="2.0" step="0.1" value="0.5">
                 </div>
                 <div class="slider-group">
-                    <label for="cfg-thrust">Max Thrust: <span id="val-thrust">35</span> N</label>
-                    <input type="range" id="cfg-thrust" min="5" max="40" step="1" value="35">
+                    <label for="cfg-thrust">Max Thrust: <span id="val-thrust">25</span> N</label>
+                    <input type="range" id="cfg-thrust" min="5" max="40" step="1" value="25">
                 </div>
                 <div class="slider-group">
-                    <label for="cfg-drag">Air Drag: <span id="val-drag">0.2</span></label>
-                    <input type="range" id="cfg-drag" min="0.0" max="1.0" step="0.05" value="0.2">
+                    <label for="cfg-drag">Air Drag: <span id="val-drag">0.50</span></label>
+                    <input type="range" id="cfg-drag" min="0.0" max="1.0" step="0.05" value="0.5">
                 </div>
                 <div class="slider-group">
-                    <label for="cfg-restitution">Restitution: <span id="val-restitution">0.35</span></label>
-                    <input type="range" id="cfg-restitution" min="0" max="0.9" step="0.05" value="0.35">
+                    <label for="cfg-restitution">Restitution: <span id="val-restitution">0.20</span></label>
+                    <input type="range" id="cfg-restitution" min="0" max="0.9" step="0.05" value="0.2">
                 </div>
                 <div class="slider-group">
-                    <label for="cfg-friction">Surface Grip: <span id="val-friction">0.50</span></label>
-                    <input type="range" id="cfg-friction" min="0" max="1.5" step="0.05" value="0.5">
+                    <label for="cfg-friction">Surface Grip: <span id="val-friction">0.20</span></label>
+                    <input type="range" id="cfg-friction" min="0" max="1.5" step="0.05" value="0.2">
                 </div>
             </div>
 
@@ -119,8 +119,8 @@
                     <label class="rev-check" style="flex: unset !important;"><input type="checkbox" id="wind-yaw"> Yaw</label>
                 </div>
                 <div class="slider-group" style="margin-top: 18px; margin-bottom: 0;">
-                    <label for="cfg-wind">Strength: <span id="val-wind">0.30</span></label>
-                    <input type="range" id="cfg-wind" min="0" max="1" step="0.05" value="0.3">
+                    <label for="cfg-wind">Strength: <span id="val-wind">0.10</span></label>
+                    <input type="range" id="cfg-wind" min="0" max="1" step="0.05" value="0.1">
                 </div>
             </div>
         </div>
@@ -217,6 +217,6 @@
         <div class="osd-instructions">Press 'Escape' to Pause | 'C' to Switch View | Toggle Arm Switch to Fly</div>
     </div>
 
-    <script type="module" src="js/main.js?v=5"></script>
+    <script type="module" src="js/main.js?v=6"></script>
 </body>
 </html>

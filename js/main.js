@@ -3,10 +3,10 @@
 // The ?v= tags are cache busters, matching the one on style.css. Browsers cache ES modules
 // aggressively, so without them an edited module can keep running from cache against fresh
 // HTML. Bump every one of these (and the two in index.html) together after changing any file.
-import { Renderer } from './renderer.js?v=5';
-import { PhysicsEngine } from './physics.js?v=5';
-import { InputHandler } from './input.js?v=5';
-import { UIHandler } from './ui.js?v=5';
+import { Renderer } from './renderer.js?v=6';
+import { PhysicsEngine } from './physics.js?v=6';
+import { InputHandler } from './input.js?v=6';
+import { UIHandler } from './ui.js?v=6';
 
 class Simulator {
     constructor() {
