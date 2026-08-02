@@ -18,6 +18,7 @@ class Simulator {
         this.ui = new UIHandler(
             this.physics,
             this.input,
+            this.renderer,
             (mapChoice) => this.start(mapChoice),
             () => this.resume(),
             () => this.reset(),
@@ -59,6 +60,8 @@ class Simulator {
             
             if (e.key === 'Escape' && this.state === 'PLAYING') {
                 this.pause();
+            } else if (e.key === 'c' || e.key === 'C') {
+                this.ui.toggleCameraMode();
             } else if (e.key === 'r' || e.key === 'R') {
                 if (this.state === 'PLAYING') {
                     this.reset();
@@ -149,6 +152,9 @@ class Simulator {
             // 5. Sync Renderer with Physics
             const droneState = this.physics.getDroneState();
             this.renderer.updateDrone(droneState);
+
+            // 6. Aim the camera (no-op in FPV, where the camera rides on the drone)
+            this.renderer.updateCamera();
         } else if (this.state === 'MENU') {
             // In menu, we can still slowly rotate the camera around the drone to look nice
             const time = now * 0.0005;
@@ -157,7 +163,7 @@ class Simulator {
             this.renderer.camera.lookAt(0, 0, 0);
         }
 
-        // 6. Render Frame
+        // 7. Render Frame
         this.renderer.render();
     }
 }

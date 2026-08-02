@@ -1,14 +1,17 @@
 // ui.js - Handles DOM interactions and Menus
 
 export class UIHandler {
-    constructor(physicsEngine, inputHandler, startCallback, resumeCallback, resetCallback, exitCallback) {
+    constructor(physicsEngine, inputHandler, renderer, startCallback, resumeCallback, resetCallback, exitCallback) {
         this.physics = physicsEngine;
         this.inputHandler = inputHandler;
+        this.renderer = renderer;
         this.startCallback = startCallback;
         this.resumeCallback = resumeCallback;
         this.resetCallback = resetCallback;
         this.exitCallback = exitCallback;
         this.speedReadoutEnabled = localStorage.getItem('speedReadoutEnabled') === 'true';
+        this.cameraMode = localStorage.getItem('cameraMode') === 'los' ? 'los' : 'fpv';
+        this.losFov = parseFloat(localStorage.getItem('losFov')) || 50;
 
         this.elements = {
             launchMenu: document.getElementById('launch-menu'),
@@ -35,11 +38,55 @@ export class UIHandler {
             
             osdArm: document.getElementById('osd-arm'),
             osdThrottle: document.getElementById('osd-throttle'),
-            speedToggle: document.getElementById('speed-readout-toggle')
+            speedToggle: document.getElementById('speed-readout-toggle'),
+
+            viewMode: document.getElementById('view-mode'),
+            losOptions: document.getElementById('los-options'),
+            losFovSlider: document.getElementById('cfg-los-fov'),
+            losFovValue: document.getElementById('val-los-fov')
         };
 
         this.initEventListeners();
         this.bindSliders();
+        this.initCameraMode();
+    }
+
+    initCameraMode() {
+        if (this.elements.losFovSlider) {
+            this.elements.losFovSlider.value = this.losFov;
+            this.elements.losFovValue.textContent = this.losFov;
+            this.elements.losFovSlider.addEventListener('input', (e) => {
+                this.losFov = parseFloat(e.target.value);
+                this.elements.losFovValue.textContent = this.losFov;
+                localStorage.setItem('losFov', this.losFov);
+                this.renderer.setLosFov(this.losFov);
+            });
+        }
+
+        if (this.elements.viewMode) {
+            this.elements.viewMode.addEventListener('change', (e) => this.applyCameraMode(e.target.value));
+        }
+
+        this.renderer.setLosFov(this.losFov);
+        this.applyCameraMode(this.cameraMode);
+    }
+
+    applyCameraMode(mode) {
+        this.cameraMode = mode === 'los' ? 'los' : 'fpv';
+        localStorage.setItem('cameraMode', this.cameraMode);
+
+        if (this.elements.viewMode) this.elements.viewMode.value = this.cameraMode;
+        if (this.elements.losOptions) {
+            this.elements.losOptions.style.display = this.cameraMode === 'los' ? 'block' : 'none';
+        }
+        // The FPV crosshair is meaningless when watching from the ground
+        this.elements.osd.classList.toggle('los-view', this.cameraMode === 'los');
+
+        this.renderer.setCameraMode(this.cameraMode);
+    }
+
+    toggleCameraMode() {
+        this.applyCameraMode(this.cameraMode === 'los' ? 'fpv' : 'los');
     }
 
     initEventListeners() {
@@ -342,6 +389,9 @@ export class UIHandler {
             }
             
             let throttleText = `THR: ${Math.round(axes.throttle * 100)}%`;
+            if (this.cameraMode === 'los') {
+                throttleText += ` | DIST: ${this.renderer.getLosDistance().toFixed(0)} m`;
+            }
             if (this.speedReadoutEnabled) {
                 const velocity = this.physics.droneBody.velocity;
                 const speedMs = velocity.length();

@@ -20,9 +20,12 @@ export class Renderer {
         this.scene.background = new THREE.Color(0x87CEEB); // Sky blue
         this.scene.fog = new THREE.Fog(0x87CEEB, 20, 100);
 
-        // Camera setup (FPV)
-        this.camera = new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, 0.01, 1000);
-        
+        // Camera setup (FPV by default, can be switched to Line of Sight)
+        this.fpvFov = 90;
+        this.losFov = 50;
+        this.cameraMode = 'fpv'; // 'fpv' | 'los'
+        this.camera = new THREE.PerspectiveCamera(this.fpvFov, window.innerWidth / window.innerHeight, 0.01, 1000);
+
         // Renderer setup
         this.renderer = new THREE.WebGLRenderer({ 
             antialias: true,
@@ -58,11 +61,8 @@ export class Renderer {
         dirLight.shadow.normalBias = 0.02;
         this.scene.add(dirLight);
 
-        // Drone Mesh (Visual rep of the collision box)
-        const droneGeo = new THREE.BoxGeometry(0.3, 0.1, 0.3); // Width x Height x Depth
-        const droneMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
-        this.droneMesh = new THREE.Mesh(droneGeo, droneMat);
-        this.droneMesh.castShadow = true;
+        // Drone Mesh (Visual rep of the collision box, only shown in Line of Sight mode)
+        this.droneMesh = this.createDroneModel();
         this.droneMesh.visible = false; // Make invisible for FPV
         this.scene.add(this.droneMesh);
 
@@ -72,6 +72,12 @@ export class Renderer {
         this.camera.position.copy(this.cameraOffset);
         // Look forward with a 20 degree up tilt (typical FPV)
         this.camera.rotation.set(THREE.MathUtils.degToRad(20), 0, 0);
+
+        // Line of Sight pilot position: standing a few metres behind the spawn point at eye height.
+        // Spawn matches PhysicsEngine.reset() so the pilot always ends up next to the drone.
+        this.spawnPosition = new THREE.Vector3(0, 1, 0);
+        this.losOffset = new THREE.Vector3(0, 0.6, 3);
+        this.losEye = new THREE.Vector3().addVectors(this.spawnPosition, this.losOffset);
 
         this.environmentGroup = new THREE.Group();
         this.scene.add(this.environmentGroup);
@@ -84,6 +90,85 @@ export class Renderer {
 
         // Handle Resize
         window.addEventListener('resize', this.onWindowResize.bind(this), false);
+    }
+
+    createDroneModel() {
+        // A small quad sized to roughly match the physics box (0.3m span).
+        // Front props are red and rear props white so orientation stays readable from a distance.
+        // fog is disabled on the drone so it doesn't fade into the sky when flown far away in LOS.
+        const group = new THREE.Group();
+
+        const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.6, fog: false });
+        const frontMat = new THREE.MeshStandardMaterial({ color: 0xff3322, emissive: 0x551108, roughness: 0.5, fog: false });
+        const rearMat = new THREE.MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.5, fog: false });
+
+        const body = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.06, 0.2), bodyMat);
+        body.castShadow = true;
+        group.add(body);
+
+        const armGeo = new THREE.BoxGeometry(0.022, 0.012, 0.14);
+        const propGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.008, 12);
+
+        // Nose points down -Z (the FPV camera looks that way), so -Z corners are the front motors
+        const motors = [
+            { x: -0.09, z: -0.09, front: true },
+            { x: 0.09, z: -0.09, front: true },
+            { x: -0.09, z: 0.09, front: false },
+            { x: 0.09, z: 0.09, front: false }
+        ];
+
+        for (const m of motors) {
+            const arm = new THREE.Mesh(armGeo, bodyMat);
+            arm.position.set(m.x * 0.5, 0, m.z * 0.5);
+            arm.rotation.y = Math.atan2(m.x, m.z); // point the arm's local +Z at the motor
+            arm.castShadow = true;
+            group.add(arm);
+
+            const prop = new THREE.Mesh(propGeo, m.front ? frontMat : rearMat);
+            prop.position.set(m.x, 0.035, m.z);
+            prop.castShadow = true;
+            group.add(prop);
+        }
+
+        return group;
+    }
+
+    setCameraMode(mode) {
+        this.cameraMode = mode === 'los' ? 'los' : 'fpv';
+
+        if (this.cameraMode === 'los') {
+            // Detach from the drone so the camera stays anchored in the world
+            this.scene.add(this.camera);
+            this.camera.fov = this.losFov;
+            this.droneMesh.visible = true;
+        } else {
+            this.droneMesh.add(this.camera);
+            this.camera.fov = this.fpvFov;
+            this.droneMesh.visible = false;
+        }
+
+        this.camera.updateProjectionMatrix();
+        this.resetCamera();
+    }
+
+    setLosFov(fov) {
+        this.losFov = fov;
+        if (this.cameraMode === 'los') {
+            this.camera.fov = fov;
+            this.camera.updateProjectionMatrix();
+        }
+    }
+
+    // Distance from the pilot's viewpoint to the drone, used by the LOS OSD readout
+    getLosDistance() {
+        return this.losEye.distanceTo(this.droneMesh.position);
+    }
+
+    // Keeps the LOS camera pinned near spawn and always aimed at the drone
+    updateCamera() {
+        if (this.cameraMode !== 'los') return;
+        this.camera.position.copy(this.losEye);
+        this.camera.lookAt(this.droneMesh.position);
     }
 
     async loadMap(mapName) {
@@ -279,6 +364,11 @@ export class Renderer {
     }
 
     resetCamera() {
+        if (this.cameraMode === 'los') {
+            this.camera.position.copy(this.losEye);
+            this.camera.lookAt(this.droneMesh.position);
+            return;
+        }
         this.camera.position.copy(this.cameraOffset);
         this.camera.rotation.set(THREE.MathUtils.degToRad(20), 0, 0);
     }

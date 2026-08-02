@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TurtleMode Simulator</title>
-    <link rel="stylesheet" href="css/style.css?v=2">
+    <link rel="stylesheet" href="css/style.css?v=3">
     <!-- Import maps for ES modules to load Three.js and Cannon-es cleanly -->
     <script type="importmap">
         {
@@ -65,6 +65,24 @@
                         <button id="btn-add-map" style="padding: 5px 15px; background: var(--accent-color); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 16px;">+</button>
                         <input type="file" id="file-add-map" accept=".glb,.gltf" style="display: none;">
                     </div>
+                </div>
+            </div>
+
+            <div class="section view-select">
+                <h2>Flight View</h2>
+                <div class="slider-group">
+                    <label for="view-mode">Camera Mode:</label>
+                    <select id="view-mode" style="padding: 5px; background: rgba(0,0,0,0.3); color: white; border: 1px solid var(--panel-border); border-radius: 4px; margin-top: 5px;">
+                        <option value="fpv">FPV (Onboard Camera)</option>
+                        <option value="los">Line of Sight (Watch From Spawn)</option>
+                    </select>
+                </div>
+                <div id="los-options" style="display: none;">
+                    <div class="slider-group">
+                        <label for="cfg-los-fov">LOS Zoom (FOV): <span id="val-los-fov">50</span>&deg;</label>
+                        <input type="range" id="cfg-los-fov" min="20" max="90" step="1" value="50">
+                    </div>
+                    <p class="small-text" style="margin-bottom: 0;">You stand a few metres behind the spawn point and the view tracks the drone automatically. Lower FOV zooms in for distant flying.</p>
                 </div>
             </div>
 
@@ -174,7 +192,7 @@
         <div class="osd-element" id="osd-arm">DISARMED</div>
         <div class="osd-element" id="osd-throttle">THR: 0%</div>
         <div class="osd-center-crosshair">+</div>
-        <div class="osd-instructions">Press 'Escape' to Pause | Toggle Arm Switch to Fly</div>
+        <div class="osd-instructions">Press 'Escape' to Pause | 'C' to Switch View | Toggle Arm Switch to Fly</div>
     </div>
 
     <script type="module" src="js/main.js"></script>

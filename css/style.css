@@ -422,6 +422,11 @@ button {
     right: 40px;
 }
 
+/* No FPV crosshair when watching the drone from the ground */
+#osd.los-view .osd-center-crosshair {
+    display: none;
+}
+
 .osd-center-crosshair {
     position: absolute;
     top: 50%;
