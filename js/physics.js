@@ -107,7 +107,7 @@ export class PhysicsEngine {
 
         // Wind. Torque at full strength, per kg of airframe - scaling by mass keeps the same
         // slider setting feeling the same on a light and a heavy drone.
-        this.windMaxTorque = 0.04; // N.m per kg
+        this.windMaxTorque = 0.02; // N.m per kg
         this.windGustTau = 0.8; // seconds for a gust to shift; larger = slower, lazier air
         this._windState = { roll: 0, pitch: 0, yaw: 0 };
 
@@ -134,12 +134,21 @@ export class PhysicsEngine {
         // sub-step has a path to sweep
         this._prevPosition = this.droneBody.position.clone();
 
-        // Whether the drone was touching a surface at the end of the last sub-step
+        // Whether the drone is resting on something. Contact is held for a short grace period
+        // after the last touch: on real map geometry a settled drone can drop and regain contact
+        // for a sub-step at a time, and without this the wind would flicker back on in the gaps.
+        this.contactGraceSteps = Math.round(0.2 / this.fixedTimeStep);
+        this._contactCooldown = 0;
         this._inContact = false;
 
         // Perform collision check and resolution immediately after every internal physics sub-step
         this.world.addEventListener('postStep', () => {
-            this._inContact = this.resolveCollisions();
+            if (this.resolveCollisions()) {
+                this._contactCooldown = this.contactGraceSteps;
+            } else if (this._contactCooldown > 0) {
+                this._contactCooldown--;
+            }
+            this._inContact = this._contactCooldown > 0;
             // Recorded after resolution so the next sub-step sweeps from where the drone
             // actually ended up, not from a position it was pushed out of
             this._prevPosition.copy(this.droneBody.position);
@@ -386,6 +395,7 @@ export class PhysicsEngine {
         // Re-seed the sweep origin, or the next sub-step would sweep from the pre-reset position
         this._prevPosition.copy(this.droneBody.position);
         this._inContact = false;
+        this._contactCooldown = 0;
         // Start calm rather than mid-gust
         this._windState.roll = 0;
         this._windState.pitch = 0;

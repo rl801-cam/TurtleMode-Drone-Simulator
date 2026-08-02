@@ -3,10 +3,15 @@
 // The ?v= tags are cache busters, matching the one on style.css. Browsers cache ES modules
 // aggressively, so without them an edited module can keep running from cache against fresh
 // HTML. Bump every one of these (and the two in index.html) together after changing any file.
-import { Renderer } from './renderer.js?v=7';
-import { PhysicsEngine } from './physics.js?v=7';
-import { InputHandler } from './input.js?v=7';
-import { UIHandler } from './ui.js?v=7';
+import { Renderer } from './renderer.js?v=8';
+import { PhysicsEngine } from './physics.js?v=8';
+import { InputHandler } from './input.js?v=8';
+import { UIHandler } from './ui.js?v=8';
+
+// Shown in the launch menu and logged on boot. index.html itself carries no cache buster, so a
+// browser holding a stale copy of it will keep loading the old ?v= modules and none of the tags
+// above will help. If this does not match the newest version, the page needs a hard reload.
+const BUILD = 'v8';
 
 class Simulator {
     constructor() {
@@ -176,5 +181,8 @@ class Simulator {
 
 // Initialize on window load
 window.addEventListener('load', () => {
+    console.log(`TurtleMode Simulator - build ${BUILD}`);
+    const stamp = document.getElementById('build-stamp');
+    if (stamp) stamp.textContent = `build ${BUILD}`;
     new Simulator();
 });
