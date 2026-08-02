@@ -1,9 +1,12 @@
 // main.js - Entry point for the application
 
-import { Renderer } from './renderer.js';
-import { PhysicsEngine } from './physics.js';
-import { InputHandler } from './input.js';
-import { UIHandler } from './ui.js';
+// The ?v= tags are cache busters, matching the one on style.css. Browsers cache ES modules
+// aggressively, so without them an edited module can keep running from cache against fresh
+// HTML. Bump every one of these (and the two in index.html) together after changing any file.
+import { Renderer } from './renderer.js?v=4';
+import { PhysicsEngine } from './physics.js?v=4';
+import { InputHandler } from './input.js?v=4';
+import { UIHandler } from './ui.js?v=4';
 
 class Simulator {
     constructor() {
