@@ -3,16 +3,16 @@
 // The ?v= tags are cache busters, matching the one on style.css. Browsers cache ES modules
 // aggressively, so without them an edited module can keep running from cache against fresh
 // HTML. Bump every one of these (and the two in index.html) together after changing any file.
-import { Renderer } from './renderer.js?v=13';
-import { PhysicsEngine } from './physics.js?v=13';
-import { InputHandler } from './input.js?v=13';
-import { UIHandler } from './ui.js?v=13';
-import { AudioEngine } from './audio.js?v=13';
+import { Renderer } from './renderer.js?v=14';
+import { PhysicsEngine } from './physics.js?v=14';
+import { InputHandler } from './input.js?v=14';
+import { UIHandler } from './ui.js?v=14';
+import { AudioEngine } from './audio.js?v=14';
 
 // Shown in the launch menu and logged on boot. index.html itself carries no cache buster, so a
 // browser holding a stale copy of it will keep loading the old ?v= modules and none of the tags
 // above will help. If this does not match the newest version, the page needs a hard reload.
-const BUILD = 'v13';
+const BUILD = 'v14';
 
 class Simulator {
     constructor() {
@@ -187,8 +187,8 @@ class Simulator {
             // 6. Aim the camera (no-op in FPV, where the camera rides on the drone)
             this.renderer.updateCamera();
 
-            // 7. Motor tone follows the thrust command
-            this.audio.update(axes.throttle, armed);
+            // 7. Motor noise follows the stick inputs, so manoeuvres are audible
+            this.audio.update(axes, armed);
         } else if (this.state === 'MENU') {
             // In menu, we can still slowly rotate the camera around the drone to look nice
             const time = now * 0.0005;

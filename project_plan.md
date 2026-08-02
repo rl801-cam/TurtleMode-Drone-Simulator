@@ -93,22 +93,25 @@ slider feels the same on any airframe. Suppressed entirely while the drone is to
 a parked drone is held by the ground, not blown around.
 
 ### 3.7 Audio
-Synthesised prop noise, entirely driven by thrust — no samples to load. Three layers give it the
-character of blades rather than a tone:
+Synthesised prop noise, entirely driven by the stick inputs — no samples to load. A quad is mostly
+*noise*, and that noise is not steady: each blade passing fires a pulse of air, so the sound is
+chopped at blade-passage rate. Four layers:
 
-- **Blade harmonics.** The oscillators run on a custom periodic wave weighted toward the
-  blade-pass harmonic and its multiples, not the rotation fundamental, because that is where a
-  real prop puts its energy.
-- **Four detuned motors.** One oscillator each, spread by about a percent. No two motors turn at
-  exactly the same rate, and the beating between them is the warble that makes a quad recognisable.
-- **Prop wash.** Bandpassed broadband noise that follows the blade frequency, weighted quadratically
-  so it stays out of the way at a hover and builds as the drone works.
+- **Chopped broadband noise** carries the sound. Bandpassed air noise amplitude-modulated at blade
+  rate by a pair of slightly detuned modulators, swinging between silence and full. The deep
+  modulation throws ring-mod sidebands either side of the blade tone, which is the hard edge of a
+  small prop.
+- **Blade harmonics** sit underneath, on a custom periodic wave weighted toward the blade-pass
+  harmonic and its multiples rather than the rotation fundamental.
+- **Four independent motors**, each running its own RPM through a quad-X mixer, so rolling,
+  pitching or yawing spreads them apart and the sound audibly works through a manoeuvre. A small
+  fixed spread keeps them beating at a steady hover.
+- **Brightness tracking RPM** — a lowpass opening from 500 Hz to 5.5 kHz.
 
-Prop rotation runs 55–260 Hz, putting the audible blade tone near 165–780 Hz, and a lowpass opens
-from 500 Hz to 5.5 kHz so the sound brightens with RPM. Amplitude and frequency remain linear in
-the throttle command. Silent when disarmed or paused, smoothed to avoid clicks on stick movement,
-and toggleable from the pause menu. The context is created on the Start button's click, which is
-the user gesture browsers require before audio may play.
+Prop rotation runs 55–260 Hz, putting the blade tone near 165–780 Hz and the chop at the same rate.
+Amplitude and frequency remain linear in the throttle command. Silent when disarmed or paused,
+smoothed to avoid clicks on stick movement, and toggleable from the pause menu. The context is
+created on the Start button's click, the user gesture browsers require before audio may play.
 
 ### 3.8 Interface
 - **Launch menu:** controller status and stick check, axis mapping, map selection, flight view,
@@ -123,12 +126,15 @@ Restitution `0.2` · Surface grip `0.2` · Wind `0.1` on all three axes.
 
 ## 4. Verification
 
-`physics.js` and `audio.js` are pure ES modules with no DOM dependencies, so they can be driven
-directly under Node — against synthetic geometry and a stubbed Web Audio API respectively. The
-suites cover landing and settling, wall and corner strikes, restitution accuracy, friction, wedged
-contacts, tunnelling at racing speed, wind behaviour and its suppression on the ground, and the
-audio mapping. They also assert invariants such as *the CCD threshold never exceeds the smallest
-contact radius*, which encode assumptions that are easy to break by accident.
+`physics.js` and `audio.js` are deliberately free of DOM dependencies, so they can be driven
+headlessly under Node — against synthetic collision callbacks and a stubbed Web Audio API
+respectively. Harnesses covering landing and settling, wall and corner strikes, restitution
+accuracy, friction, wedged contacts, tunnelling at racing speed, wind gating, and the audio mapping
+were used throughout development and all pass.
+
+**These harnesses are not currently committed.** Adding them under `tests/` is the cheapest way to
+protect the physics invariants documented in [`handoff.md`](handoff.md) — several of them are the
+kind of assumption a reasonable-looking refactor silently breaks.
 
 ## 5. Roadmap
 
@@ -147,12 +153,15 @@ contact radius*, which encode assumptions that are easy to break by accident.
 1. **Persistent settings.** Only camera mode, LOS zoom, speed readout and audio persist. Rates,
    physics parameters and axis mappings reset on reload — the most disruptive remaining gap, since
    a pilot's rates and radio mapping are exactly what should be remembered.
-2. **Per-motor thrust.** Thrust is currently a single force at the centre of mass. Four forces at
+2. **Commit the test harnesses**, so the physics invariants stop relying on memory.
+3. **Per-motor thrust.** Thrust is currently a single force at the centre of mass. Four forces at
    the arm positions would unlock motor spool-up lag (thrust is instantaneous today), differential
    yaw authority, and prop wash.
-3. **Turtle mode.** Flipping an inverted drone by reversing two motors — the feature the project is
+4. **Turtle mode.** Flipping an inverted drone by reversing two motors — the feature the project is
    named for. Depends on per-motor thrust.
-4. **Spawn points.** Spawn is hard-coded to `(0, 1, 0)`, and the LOS camera assumes ground at
+5. **Spawn points.** Spawn is hard-coded to `(0, 1, 0)`, and the LOS camera assumes ground at
    `y = 0`. Per-map spawn points would fix both.
-5. **Angle / horizon mode.** Acro only at present; a self-levelling mode makes day one possible.
-6. **Gates and lap timing**, then replay/ghost — the training loop the simulator is ultimately for.
+6. **Angle / horizon mode.** Acro only at present; a self-levelling mode makes day one possible.
+7. **Audio distance.** In Line of Sight mode a drone 50 m away is as loud as one at your feet;
+   attenuation and high-frequency rolloff with distance would help considerably.
+8. **Gates and lap timing**, then replay/ghost — the training loop the simulator is ultimately for.

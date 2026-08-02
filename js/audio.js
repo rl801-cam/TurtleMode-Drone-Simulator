@@ -1,16 +1,20 @@
 // audio.js - Motor and prop noise synthesis
 //
-// A quad does not sound like a sine wave. Three things make the difference, and all three are
-// driven by thrust:
+// A quad is mostly *noise*, and that noise is not steady: each blade passing the airframe fires a
+// pulse of air, so the sound is chopped at blade-passage rate. That chopping is what separates
+// "blades cutting air" from "a synth pad and some hiss", and it is the core of this engine.
 //
-//   1. Harmonics. A blade puts most of its energy into the blade-pass harmonic (rotation rate
-//      times blade count) and its multiples, not into the rotation fundamental itself. So the
-//      oscillators run on a custom periodic wave shaped for that, rather than a plain tone.
-//   2. Four motors, slightly apart. No two motors turn at exactly the same rate, and the beating
-//      between them is the warble that makes a quad recognisable. One oscillator per motor,
-//      detuned by a fraction of a percent.
-//   3. Prop wash. Broadband air noise through a bandpass that follows the blades, weighted to the
-//      top of the throttle range where the drone is actually moving air.
+// Four layers, all driven by the stick inputs:
+//
+//   1. Chopped broadband noise. Bandpassed air noise, amplitude-modulated at the blade rate by a
+//      pair of slightly detuned modulators. The modulation is deep, which throws ring-mod
+//      sidebands either side of the blade tone - the hard, angry edge of a small prop.
+//   2. Blade harmonics. Oscillators on a custom periodic wave weighted toward the blade-pass
+//      harmonic and its multiples, where a real prop puts its energy.
+//   3. Four independent motors. Each runs its own RPM through a quad mixer, so rolling, pitching
+//      or yawing spreads the motors apart and the sound audibly works - exactly as a real quad
+//      wavers through a manoeuvre. At a steady hover a small fixed spread keeps them beating.
+//   4. Brightness tracking RPM, via a lowpass that opens with throttle.
 //
 // Everything is synthesised, so there are no samples to load.
 
@@ -20,24 +24,34 @@ export class AudioEngine {
         this.enabled = true;
 
         this.motors = [];
+        this.choppers = [];
         this.toneGain = null;
         this.toneFilter = null;
+        this.chopGain = null;
         this.noiseGain = null;
         this.noiseFilter = null;
         this.master = null;
 
-        // Prop *rotation* rate. The audible pitch sits on the blade-pass harmonics well above
-        // this, so the tone you hear runs roughly three times higher than these numbers.
+        // Prop *rotation* rate. The audible pitch sits on the blade-pass harmonics above this.
         this.minFrequency = 55; // Hz at zero thrust
         this.maxFrequency = 260; // Hz at full thrust
+        this.bladeCount = 3;
 
-        // Per-motor rate spread. Small on purpose: a few Hz of beating reads as a real airframe,
-        // more starts to sound like a broken one.
+        // Fixed per-motor spread, so the motors still beat against each other at a steady hover.
+        // Manoeuvres add far more than this on top.
         this.motorDetune = [1, 1.006, 0.994, 1.011];
 
-        // Four oscillators sum into the tone gain, so the ceiling here is per-motor
-        this.maxToneGain = 0.035;
-        this.maxNoiseGain = 0.05;
+        // How hard the control mixer pushes the motors apart. Audio only - this mirrors the shape
+        // of a real mixer to get the character right, it is not the flight model.
+        this.mixerAuthority = 0.35;
+
+        // Noise carries the sound; the tone sits underneath it. Four oscillators sum into the
+        // tone gain, so that ceiling is per-motor.
+        this.maxToneGain = 0.028;
+        this.maxNoiseGain = 0.16;
+
+        // Depth of the blade chop. 0.5 swings the noise between silence and full.
+        this.chopDepth = 0.5;
 
         // Exponential smoothing time constant. Stick input arrives in discrete frames, and
         // stepping the parameters straight to their new values clicks audibly.
@@ -46,9 +60,9 @@ export class AudioEngine {
 
     // Relative strength of each harmonic of the rotation rate. Index 0 is DC and must stay zero.
     // The peak at the third harmonic is the blade-pass tone of a three-blade prop; the smaller
-    // peaks at 6 and 9 are its multiples.
+    // peaks at 6 and 9 are its multiples. The long tail keeps it buzzy rather than flute-like.
     bladeHarmonics() {
-        return [0, 0.25, 0.55, 1.0, 0.45, 0.3, 0.5, 0.18, 0.12, 0.22, 0.1, 0.08, 0.14];
+        return [0, 0.2, 0.35, 1.0, 0.5, 0.4, 0.65, 0.3, 0.25, 0.4, 0.22, 0.18, 0.3, 0.15, 0.12, 0.2];
     }
 
     // Must be called from a user gesture (the Start button). Browsers create the context in a
@@ -105,22 +119,45 @@ export class AudioEngine {
         const data = buffer.getChannelData(0);
         for (let i = 0; i < frames; i++) data[i] = Math.random() * 2 - 1;
 
+        this.noiseGain = this.ctx.createGain();
+        this.noiseGain.gain.value = 0;
+        this.noiseGain.connect(this.master);
+
+        // The blade chop. Modulator output is *added* to this gain, so the resting value sits one
+        // depth below unity and the modulators swing it up to full and back down.
+        this.chopGain = this.ctx.createGain();
+        this.chopGain.gain.value = 1 - this.chopDepth;
+        this.chopGain.connect(this.noiseGain);
+
         this.noiseFilter = this.ctx.createBiquadFilter();
         this.noiseFilter.type = 'bandpass';
         this.noiseFilter.frequency.value = this.noiseBandFor(0);
         this.noiseFilter.Q.value = 0.7;
-        this.noiseFilter.connect(this.master);
-
-        this.noiseGain = this.ctx.createGain();
-        this.noiseGain.gain.value = 0;
-        this.noiseGain.connect(this.noiseFilter);
+        this.noiseFilter.connect(this.chopGain);
 
         const source = this.ctx.createBufferSource();
         source.buffer = buffer;
         source.loop = true;
-        source.connect(this.noiseGain);
+        source.connect(this.noiseFilter);
         source.start();
         this.noiseSource = source;
+
+        // Two modulators a hair apart, so the chop itself drifts in and out of phase instead of
+        // sitting at one rigid rate
+        const bladeRate = this.bladeRateFor(0);
+        for (const ratio of [1, 1.008]) {
+            const mod = this.ctx.createOscillator();
+            mod.type = 'sine';
+            mod.frequency.value = bladeRate * ratio;
+
+            const depth = this.ctx.createGain();
+            depth.gain.value = this.chopDepth / 2; // the pair sums to one full depth
+            mod.connect(depth);
+            depth.connect(this.chopGain.gain);
+            mod.start();
+
+            this.choppers.push(mod);
+        }
     }
 
     setEnabled(enabled) {
@@ -136,8 +173,31 @@ export class AudioEngine {
         return Math.max(0, Math.min(1, thrust));
     }
 
+    // Per-motor throttle for a quad X layout. Used only to shape the sound: what matters is that
+    // the motors diverge in the same way a real mixer diverges them, so manoeuvres are audible.
+    motorLevels(axes, armed) {
+        const clean = (v) => (Number.isFinite(v) ? Math.max(-1, Math.min(1, v)) : 0);
+        const base = this.level(axes ? axes.throttle : 0, armed);
+        if (base <= 0) return [0, 0, 0, 0];
+
+        const roll = clean(axes.roll) * this.mixerAuthority;
+        const pitch = clean(axes.pitch) * this.mixerAuthority;
+        const yaw = clean(axes.yaw) * this.mixerAuthority;
+
+        return [
+            base + pitch + roll - yaw, // front left
+            base + pitch - roll + yaw, // front right
+            base - pitch + roll + yaw, // rear left
+            base - pitch - roll - yaw // rear right
+        ].map((v) => Math.max(0, Math.min(1, v)));
+    }
+
     frequencyFor(level) {
         return this.minFrequency + (this.maxFrequency - this.minFrequency) * level;
+    }
+
+    bladeRateFor(level) {
+        return this.frequencyFor(level) * this.bladeCount;
     }
 
     gainFor(level) {
@@ -148,31 +208,40 @@ export class AudioEngine {
         return 500 + 5000 * level;
     }
 
-    // Squared, so prop wash stays out of the way at a hover and builds as the drone works
+    // Slightly compressed rather than squared: a real quad already has a hard edge at part
+    // throttle, it does not stay polite until the last of the stick.
     noiseGainFor(level) {
-        return this.maxNoiseGain * level * level;
+        return this.maxNoiseGain * Math.pow(level, 1.3);
     }
 
     noiseBandFor(level) {
         return 600 + 2500 * level;
     }
 
-    update(thrust, armed) {
+    update(axes, armed) {
         if (!this.ctx || !this.enabled) return;
 
-        const level = this.level(thrust, armed);
+        const levels = this.motorLevels(axes, armed);
+        const mean = (levels[0] + levels[1] + levels[2] + levels[3]) / 4;
         const now = this.ctx.currentTime;
-        const rotation = this.frequencyFor(level);
 
+        // Each motor runs its own RPM, so the spread widens through a manoeuvre
         for (let i = 0; i < this.motors.length; i++) {
-            this.motors[i].frequency.setTargetAtTime(
-                rotation * this.motorDetune[i], now, this.smoothing);
+            const rpm = this.frequencyFor(levels[i]) * this.motorDetune[i];
+            this.motors[i].frequency.setTargetAtTime(rpm, now, this.smoothing);
         }
 
-        this.toneGain.gain.setTargetAtTime(this.gainFor(level), now, this.smoothing);
-        this.toneFilter.frequency.setTargetAtTime(this.brightnessFor(level), now, this.smoothing);
-        this.noiseGain.gain.setTargetAtTime(this.noiseGainFor(level), now, this.smoothing);
-        this.noiseFilter.frequency.setTargetAtTime(this.noiseBandFor(level), now, this.smoothing);
+        // The chop follows the blades
+        const bladeRate = this.bladeRateFor(mean);
+        for (let i = 0; i < this.choppers.length; i++) {
+            const ratio = i === 0 ? 1 : 1.008;
+            this.choppers[i].frequency.setTargetAtTime(bladeRate * ratio, now, this.smoothing);
+        }
+
+        this.toneGain.gain.setTargetAtTime(this.gainFor(mean), now, this.smoothing);
+        this.toneFilter.frequency.setTargetAtTime(this.brightnessFor(mean), now, this.smoothing);
+        this.noiseGain.gain.setTargetAtTime(this.noiseGainFor(mean), now, this.smoothing);
+        this.noiseFilter.frequency.setTargetAtTime(this.noiseBandFor(mean), now, this.smoothing);
     }
 
     // Fade out without touching the oscillators, so sound can come straight back on resume
