@@ -3,16 +3,16 @@
 // The ?v= tags are cache busters, matching the one on style.css. Browsers cache ES modules
 // aggressively, so without them an edited module can keep running from cache against fresh
 // HTML. Bump every one of these (and the two in index.html) together after changing any file.
-import { Renderer } from './renderer.js?v=12';
-import { PhysicsEngine } from './physics.js?v=12';
-import { InputHandler } from './input.js?v=12';
-import { UIHandler } from './ui.js?v=12';
-import { AudioEngine } from './audio.js?v=12';
+import { Renderer } from './renderer.js?v=13';
+import { PhysicsEngine } from './physics.js?v=13';
+import { InputHandler } from './input.js?v=13';
+import { UIHandler } from './ui.js?v=13';
+import { AudioEngine } from './audio.js?v=13';
 
 // Shown in the launch menu and logged on boot. index.html itself carries no cache buster, so a
 // browser holding a stale copy of it will keep loading the old ?v= modules and none of the tags
 // above will help. If this does not match the newest version, the page needs a hard reload.
-const BUILD = 'v12';
+const BUILD = 'v13';
 
 class Simulator {
     constructor() {

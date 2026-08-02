@@ -93,11 +93,22 @@ slider feels the same on any airframe. Suppressed entirely while the drone is to
 a parked drone is held by the ground, not blown around.
 
 ### 3.7 Audio
-A single sine oscillator whose **pitch and amplitude both track thrust** — 80 Hz to 450 Hz, and
-silent up to a modest ceiling, both linear in the throttle command. Real motors are a stack of
-harmonics, but a clean tone is enough to fly by ear. Silent when disarmed or paused, smoothed to
-avoid clicks on stick movement, and toggleable from the pause menu. The context is created on the
-Start button's click, which is the user gesture browsers require before audio may play.
+Synthesised prop noise, entirely driven by thrust — no samples to load. Three layers give it the
+character of blades rather than a tone:
+
+- **Blade harmonics.** The oscillators run on a custom periodic wave weighted toward the
+  blade-pass harmonic and its multiples, not the rotation fundamental, because that is where a
+  real prop puts its energy.
+- **Four detuned motors.** One oscillator each, spread by about a percent. No two motors turn at
+  exactly the same rate, and the beating between them is the warble that makes a quad recognisable.
+- **Prop wash.** Bandpassed broadband noise that follows the blade frequency, weighted quadratically
+  so it stays out of the way at a hover and builds as the drone works.
+
+Prop rotation runs 55–260 Hz, putting the audible blade tone near 165–780 Hz, and a lowpass opens
+from 500 Hz to 5.5 kHz so the sound brightens with RPM. Amplitude and frequency remain linear in
+the throttle command. Silent when disarmed or paused, smoothed to avoid clicks on stick movement,
+and toggleable from the pause menu. The context is created on the Start button's click, which is
+the user gesture browsers require before audio may play.
 
 ### 3.8 Interface
 - **Launch menu:** controller status and stick check, axis mapping, map selection, flight view,
