@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TurtleMode Simulator</title>
-    <link rel="stylesheet" href="css/style.css?v=16">
+    <link rel="stylesheet" href="css/style.css?v=17">
     <!-- Import maps for ES modules to load Three.js and Cannon-es cleanly -->
     <script type="importmap">
         {
@@ -51,6 +51,11 @@
                     <div class="map-row"><label>Roll (Axis):</label> <input type="number" id="map-r-idx" value="0" min="0" max="15"> <label class="rev-check"><input type="checkbox" id="map-r-rev"> Rev</label></div>
                     <div class="map-row"><label>Arm (Button):</label> <input type="number" id="map-arm-idx" value="0" min="0" max="31"></div>
                 </div>
+                <div class="slider-group" style="margin-top: 18px; margin-bottom: 0;">
+                    <label for="cfg-latency">Control Latency: <span id="val-latency">0</span> ms</label>
+                    <input type="range" id="cfg-latency" min="0" max="200" step="5" value="0">
+                </div>
+                <p class="small-text" style="text-align: left; margin-bottom: 0;">Delay between stick and drone. A real link runs about 20&ndash;40 ms; higher is what a congested or long-range link feels like.</p>
             </div>
 
             <div class="section map-select">
@@ -221,6 +226,6 @@
         <div class="osd-instructions">Press 'Escape' to Pause | 'C' to Switch View | Toggle Arm Switch to Fly</div>
     </div>
 
-    <script type="module" src="js/main.js?v=16"></script>
+    <script type="module" src="js/main.js?v=17"></script>
 </body>
 </html>

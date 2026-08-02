@@ -28,6 +28,7 @@ hosted on GitHub Pages.
 | `js/input.js` | Gamepad polling, axis mapping, deadband, arm switch |
 | `js/ui.js` | DOM bindings, menus, slider-to-physics wiring, map upload |
 | `js/audio.js` | Motor tone synthesis |
+| `js/latency.js` | Artificial control-link delay |
 
 **Module caching:** `index.html` and the imports in `main.js` carry a `?v=N` cache-busting tag, and
 the running build is logged to the console and shown in the launch menu. Bump every tag together
@@ -43,6 +44,12 @@ anything that looks like an unapplied change.
   visualiser and axis bars for verification.
 - Configurable arm button; a disarmed drone receives no thrust and makes no sound.
 - 5% deadband, rescaled so the usable stick range stays full.
+- **Control latency**, 0–200 ms. Commands are buffered and delivered late, so the drone reacts the
+  way it does over a real radio link (about 20–40 ms end to end; more is what a congested or
+  long-range link feels like). The delayed signal is interpolated between frames rather than
+  quantised to them, and the arm switch is delayed alongside the sticks but never blended. The
+  motors follow the delayed command, so latency is audible as well as felt. The stick visualiser
+  deliberately stays live, since it exists to verify the transmitter.
 
 ### 3.2 Flight Model
 - Fixed 120 Hz physics sub-step. Thrust and control torque are injected through Cannon-es's
@@ -134,15 +141,16 @@ created on the Start button's click, the user gesture browsers require before au
 
 ### 3.9 Default Configuration
 Mass `0.5 kg` · Max thrust `25 N` (~5:1 TWR, hover near 20% throttle) · Air drag `0.5` ·
-Restitution `0.2` · Surface grip `0.2` · Wind `0.1` on all three axes.
+Restitution `0.2` · Surface grip `0.2` · Wind `0.1` on all three axes · Control latency `0 ms`.
 
 ## 4. Verification
 
 `physics.js` and `audio.js` are deliberately free of DOM dependencies, so they can be driven
 headlessly under Node — against synthetic collision callbacks and a stubbed Web Audio API
-respectively. Harnesses covering landing and settling, wall and corner strikes, restitution
-accuracy, friction, wedged contacts, tunnelling at racing speed, wind gating, and the audio mapping
-were used throughout development and all pass.
+respectively; `latency.js` needs no stubbing at all. Harnesses covering landing and settling, wall
+and corner strikes, restitution accuracy, friction, wedged contacts, tunnelling at racing speed,
+wind gating, the audio mapping, and control-link delay were used throughout development and all
+pass.
 
 **These harnesses are not currently committed.** Adding them under `tests/` is the cheapest way to
 protect the physics invariants documented in [`handoff.md`](handoff.md) — several of them are the

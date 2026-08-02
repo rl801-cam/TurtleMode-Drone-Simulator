@@ -30,10 +30,11 @@ up across framerates.
 * **`js/input.js`** — Gamepad API, axis mapping, deadband, reversing, arm switch.
 * **`js/ui.js`** — DOM bindings, menus, slider-to-physics wiring, custom map upload.
 * **`js/audio.js`** — synthesised motor and prop noise.
+* **`js/latency.js`** — artificial control-link delay. Pure and DOM-free, so it tests directly.
 
 ### Default configuration
 Mass `0.5 kg` · Max thrust `25 N` (~5:1 TWR, hover near 20% throttle) · Air drag `0.5` ·
-Restitution `0.2` · Surface grip `0.2` · Wind `0.1` on all three axes.
+Restitution `0.2` · Surface grip `0.2` · Wind `0.1` on all three axes · Control latency `0 ms`.
 
 Defaults live in **two places that must agree**: `params` in `physics.js` and the `value=`
 attributes plus readout spans in `index.html`. There is no persistence layer, so these are what
@@ -93,7 +94,12 @@ Each of these was found the hard way. They are load-bearing.
 10. **The AudioContext must be created from a user gesture.** It is started inside
    `Simulator.start()`, which is reached synchronously from the Start button's click handler. Move
    it and audio silently never plays.
-11. **Turbulence wind is suppressed while the drone is touching a surface**, with a short grace
+11. **Control latency stores copies, not references.** `InputHandler.getAxes()` returns one
+    object that it mutates in place every frame, so holding it would make every queued sample the
+    current one and the delay would silently do nothing. `ControlDelay.push()` copies the values
+    out. The queue is also cleared on reset, or commands from before the teleport still arrive
+    after it.
+12. **Turbulence wind is suppressed while the drone is touching a surface**, with a short grace
     period so contact flicker on uneven map geometry does not let it back in. Note the naming: the
     *wind* in `physics.js` is a disturbance torque, while `air*` in `audio.js` is the sound of
     moving through air. They are unrelated.
@@ -125,6 +131,7 @@ every tag and `BUILD` together after editing any module.
 7. **Wind.** Low-pass filtered per-axis disturbance torque, suppressed on the ground.
 8. **Audio.** Synthesised chopped prop noise driven by the stick inputs, an airspeed-driven wind
    layer so speed is audible on its own, and distance attenuation in Line of Sight.
+9. **Control latency.** Adjustable 0–200 ms link delay between sticks and flight model.
 
 ## Verification
 

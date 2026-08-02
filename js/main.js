@@ -3,16 +3,17 @@
 // The ?v= tags are cache busters, matching the one on style.css. Browsers cache ES modules
 // aggressively, so without them an edited module can keep running from cache against fresh
 // HTML. Bump every one of these (and the two in index.html) together after changing any file.
-import { Renderer } from './renderer.js?v=16';
-import { PhysicsEngine } from './physics.js?v=16';
-import { InputHandler } from './input.js?v=16';
-import { UIHandler } from './ui.js?v=16';
-import { AudioEngine } from './audio.js?v=16';
+import { Renderer } from './renderer.js?v=17';
+import { PhysicsEngine } from './physics.js?v=17';
+import { InputHandler } from './input.js?v=17';
+import { UIHandler } from './ui.js?v=17';
+import { AudioEngine } from './audio.js?v=17';
+import { ControlDelay } from './latency.js?v=17';
 
 // Shown in the launch menu and logged on boot. index.html itself carries no cache buster, so a
 // browser holding a stale copy of it will keep loading the old ?v= modules and none of the tags
 // above will help. If this does not match the newest version, the page needs a hard reload.
-const BUILD = 'v16';
+const BUILD = 'v17';
 
 class Simulator {
     constructor() {
@@ -20,6 +21,7 @@ class Simulator {
         this.physics = new PhysicsEngine();
         this.input = new InputHandler();
         this.audio = new AudioEngine();
+        this.controlDelay = new ControlDelay();
         
         // Register collision check callback to evaluate inside the physics sub-step.
         // The physics engine drives the radius - it queries several contact spheres per sub-step.
@@ -74,6 +76,17 @@ class Simulator {
             });
         }
 
+        // Control latency
+        const latencySlider = document.getElementById('cfg-latency');
+        const latencyValue = document.getElementById('val-latency');
+        if (latencySlider) {
+            latencySlider.addEventListener('input', (e) => {
+                const ms = parseInt(e.target.value, 10) || 0;
+                latencyValue.textContent = ms;
+                this.controlDelay.setLatency(ms / 1000);
+            });
+        }
+
         // Listen for ESC to pause, and R to reset
         window.addEventListener('keydown', (e) => {
             console.log("Key pressed:", e.key, "State:", this.state, "Active Element:", document.activeElement ? document.activeElement.tagName : 'none');
@@ -109,6 +122,7 @@ class Simulator {
 
         this.state = 'PLAYING';
         this.lastTime = performance.now();
+        this.controlDelay.clear();
         this.renderer.resetCamera();
         await this.renderer.loadMap(mapChoice);
     }
@@ -127,6 +141,8 @@ class Simulator {
 
     reset() {
         this.physics.reset();
+        // Drop queued commands, or input from before the teleport would still arrive afterwards
+        this.controlDelay.clear();
         this.state = 'PLAYING';
         this.lastTime = performance.now();
         this.renderer.resetCamera();
@@ -173,8 +189,11 @@ class Simulator {
         this.ui.updateDashboard(axes, armed);
 
         if (this.state === 'PLAYING') {
-            // 3. Set physics inputs (applied continuously in body.preStep)
-            this.physics.setInputs(axes, armed);
+            // 3. Run the sticks through the control link, then set physics inputs (applied
+            // continuously in body.preStep). At zero latency this hands back the live input.
+            this.controlDelay.push(axes, armed, now / 1000);
+            const command = this.controlDelay.sample(now / 1000) || { axes, armed };
+            this.physics.setInputs(command.axes, command.armed);
             
             // 4. Step Physics Engine (sub-steps inside this method will fire the 'postStep' listener and handle collisions)
             // Cap dt to prevent huge jumps if tab was inactive
@@ -190,9 +209,10 @@ class Simulator {
             // 7. Motor noise follows the stick inputs; wind noise follows how fast the
             // airframe is actually moving through the air
             // In Line of Sight the pilot is on the ground, so the drone is attenuated by range
+            // The motors follow the delayed command, not the sticks, so latency is audible too
             this.audio.update(
-                axes,
-                armed,
+                command.axes,
+                command.armed,
                 this.physics.droneBody.velocity.length(),
                 this.renderer.getListenerDistance()
             );
