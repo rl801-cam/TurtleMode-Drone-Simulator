@@ -73,11 +73,18 @@ export class Renderer {
         // Look forward with a 20 degree up tilt (typical FPV)
         this.camera.rotation.set(THREE.MathUtils.degToRad(20), 0, 0);
 
-        // Line of Sight pilot position: standing a few metres behind the spawn point at eye height.
+        // Line of Sight pilot position: standing a few metres behind the spawn point.
         // Spawn matches PhysicsEngine.reset() so the pilot always ends up next to the drone.
+        // Eye height is measured from the ground rather than offset from the spawn, so it stays
+        // put if the drone's spawn altitude ever changes.
         this.spawnPosition = new THREE.Vector3(0, 1, 0);
-        this.losOffset = new THREE.Vector3(0, 0.6, 3);
-        this.losEye = new THREE.Vector3().addVectors(this.spawnPosition, this.losOffset);
+        this.losEyeHeight = 1.5; // metres above ground
+        this.losStandoff = 3; // metres behind the spawn point
+        this.losEye = new THREE.Vector3(
+            this.spawnPosition.x,
+            this.losEyeHeight,
+            this.spawnPosition.z + this.losStandoff
+        );
 
         this.environmentGroup = new THREE.Group();
         this.scene.add(this.environmentGroup);
