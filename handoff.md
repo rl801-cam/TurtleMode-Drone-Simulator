@@ -34,7 +34,8 @@ up across framerates.
 
 ### Default configuration
 Mass `0.5 kg` · Max thrust `25 N` (~5:1 TWR, hover near 20% throttle) · Air drag `0.5` ·
-Restitution `0.2` · Surface grip `0.2` · Wind `0.1` on all three axes · Video latency `0 ms`.
+Restitution `0.2` · Surface grip `0.2` · Wind `0.1` on all three axes · Video latency `0 ms` ·
+Camera uptilt `10°` · Default map `Bando`.
 
 Defaults live in **two places that must agree**: `params` in `physics.js` and the `value=`
 attributes plus readout spans in `index.html`. There is no persistence layer, so these are what
@@ -106,7 +107,15 @@ Each of these was found the hard way. They are load-bearing.
     interpolated with shortest-arc slerp, since componentwise blending of quaternions leaves an
     unnormalised one that shears the whole picture. The buffer is cleared on reset, or the view
     replays the old flight after the teleport.
-12. **Turbulence wind is suppressed while the drone is touching a surface**, with a short grace
+12. **Camera uptilt is a positive rotation about the camera's local X.** The camera looks down its
+    own −Z, so a positive angle lifts the forward vector to `(0, sin, −cos)` — get the sign wrong
+    and the "uptilt" points at the ground. It is applied in exactly one place,
+    `renderer.applyFpvUptilt()`, called from construction, `resetCamera()` and `setFpvUptilt()`;
+    do not reintroduce a hardcoded angle in `resetCamera`. `setFpvUptilt()` returns the clamped
+    value and the UI stores *that*, so the slider can never drift outside the range. One trap in
+    `ui.js`: the stored angle is read with `Number.isFinite`, not `|| 10` — 0° is a legitimate
+    setting that `||` would silently overwrite.
+13. **Turbulence wind is suppressed while the drone is touching a surface**, with a short grace
     period so contact flicker on uneven map geometry does not let it back in. Note the naming: the
     *wind* in `physics.js` is a disturbance torque, while `air*` in `audio.js` is the sound of
     moving through air. They are unrelated.
@@ -140,14 +149,23 @@ every tag and `BUILD` together after editing any module.
    layer so speed is audible on its own, and distance attenuation in Line of Sight.
 9. **Video latency.** Adjustable 0–200 ms FPV feed delay. The view lags; the controls and the
    physics do not.
+10. **Camera uptilt.** 0–60°, default 10°, from the menu slider or the ↑/↓ arrow keys in flight.
 
 ## Verification
 
 `physics.js` and `audio.js` are deliberately free of DOM dependencies so they can be driven
 headlessly under Node — against synthetic collision callbacks and a stubbed Web Audio API
-respectively. Harnesses covering landing and settling, wall and corner strikes, restitution
-accuracy, friction, wedged contacts, tunnelling at racing speed, wind gating, and the audio
-mapping were used throughout development and all pass.
+respectively. Seven harnesses, **165 checks**, covering landing and settling, wall and corner
+strikes, restitution accuracy, friction, wedged contacts, tunnelling at racing speed, wind gating,
+the audio mapping, video-link delay, and the camera uptilt convention. All pass.
+
+Every harness reads the **shipped** file and none keeps a copy — a stale copy asserts against code
+that no longer exists, and one here produced four false results before it was caught. Two details
+make that work: `physics.js` reaches `cannon-es` through the browser's import map, so its shipped
+source is rewritten next to `node_modules` on every run rather than imported in place; and
+`renderer.js`/`ui.js` cannot be imported at all under Node, so the method under test is lifted out
+of the shipped source and executed — a rename breaks the extraction and fails the test instead of
+quietly passing.
 
 **They are not currently committed to this repository.** Re-creating them, or committing the
 existing ones under `tests/`, is the single cheapest way to protect the invariants listed above —
@@ -155,7 +173,8 @@ most of them are exactly the kind of thing a well-meaning refactor quietly break
 
 ## Known Limitations & Next Steps
 
-1. **Persistent storage.** Only camera mode, LOS zoom, speed readout and audio persist. Rates,
+1. **Persistent storage.** Only camera mode, LOS zoom, camera uptilt, speed readout and audio
+   persist. Rates,
    physics parameters and axis mappings reset on reload — the most disruptive gap, since a pilot's
    rates and radio mapping are precisely what should be remembered. `localStorage` in `ui.js` and
    `input.js`.

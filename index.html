@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TurtleMode Simulator</title>
-    <link rel="stylesheet" href="css/style.css?v=18">
+    <link rel="stylesheet" href="css/style.css?v=19">
     <!-- Import maps for ES modules to load Three.js and Cannon-es cleanly -->
     <script type="importmap">
         {
@@ -59,8 +59,8 @@
                     <label for="map-choice">Map:</label>
                     <div style="display: flex; gap: 10px; margin-top: 5px;">
                         <select id="map-choice" style="flex: 1; padding: 5px; background: rgba(0,0,0,0.3); color: white; border: 1px solid var(--border-color); border-radius: 4px;">
+                            <option value="bando" selected>Bando (bando.glb)</option>
                             <option value="placeholder">Placeholder (Procedural)</option>
-                            <option value="bando">Bando (bando.glb)</option>
                         </select>
                         <button id="btn-add-map" style="padding: 5px 15px; background: var(--accent-color); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 16px;">+</button>
                         <input type="file" id="file-add-map" accept=".glb,.gltf" style="display: none;">
@@ -78,6 +78,11 @@
                     </select>
                 </div>
                 <div id="fpv-options">
+                    <div class="slider-group">
+                        <label for="cfg-uptilt">Camera Uptilt: <span id="val-uptilt">10</span>&deg;</label>
+                        <input type="range" id="cfg-uptilt" min="0" max="60" step="1" value="10">
+                    </div>
+                    <p class="small-text" style="text-align: left;">How far the onboard camera points above level. Adjust in flight with <strong>&uarr;</strong> and <strong>&darr;</strong>. More uptilt suits faster flying, since the airframe leans further forward to get there.</p>
                     <div class="slider-group">
                         <label for="cfg-latency">Video Latency: <span id="val-latency">0</span> ms</label>
                         <input type="range" id="cfg-latency" min="0" max="200" step="5" value="0">
@@ -225,9 +230,9 @@
         <div class="osd-element" id="osd-arm">DISARMED</div>
         <div class="osd-element" id="osd-throttle">THR: 0%</div>
         <div class="osd-center-crosshair">+</div>
-        <div class="osd-instructions">Press 'Escape' to Pause | 'C' to Switch View | Toggle Arm Switch to Fly</div>
+        <div class="osd-instructions">Press 'Escape' to Pause | 'C' to Switch View | &uarr;&darr; Camera Uptilt | Toggle Arm Switch to Fly</div>
     </div>
 
-    <script type="module" src="js/main.js?v=18"></script>
+    <script type="module" src="js/main.js?v=19"></script>
 </body>
 </html>

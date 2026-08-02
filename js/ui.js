@@ -12,6 +12,12 @@ export class UIHandler {
         this.speedReadoutEnabled = localStorage.getItem('speedReadoutEnabled') === 'true';
         this.cameraMode = localStorage.getItem('cameraMode') === 'los' ? 'los' : 'fpv';
         this.losFov = parseFloat(localStorage.getItem('losFov')) || 50;
+        // Not `|| 10` - 0 degrees is a legitimate setting and would be silently overwritten
+        const storedUptilt = parseFloat(localStorage.getItem('fpvUptilt'));
+        this.fpvUptilt = Number.isFinite(storedUptilt) ? storedUptilt : 10;
+        // Adjusting uptilt in flight happens with the menu closed, so the OSD shows the new angle
+        // briefly. Without it the arrow keys give no feedback at all on a featureless wall.
+        this.uptiltFlashUntil = 0;
 
         this.elements = {
             launchMenu: document.getElementById('launch-menu'),
@@ -44,7 +50,9 @@ export class UIHandler {
             losOptions: document.getElementById('los-options'),
             fpvOptions: document.getElementById('fpv-options'),
             losFovSlider: document.getElementById('cfg-los-fov'),
-            losFovValue: document.getElementById('val-los-fov')
+            losFovValue: document.getElementById('val-los-fov'),
+            uptiltSlider: document.getElementById('cfg-uptilt'),
+            uptiltValue: document.getElementById('val-uptilt')
         };
 
         this.initEventListeners();
@@ -64,12 +72,37 @@ export class UIHandler {
             });
         }
 
+        if (this.elements.uptiltSlider) {
+            this.elements.uptiltSlider.addEventListener('input', (e) => {
+                this.setFpvUptilt(parseFloat(e.target.value), false);
+            });
+        }
+
         if (this.elements.viewMode) {
             this.elements.viewMode.addEventListener('change', (e) => this.applyCameraMode(e.target.value));
         }
 
         this.renderer.setLosFov(this.losFov);
+        this.setFpvUptilt(this.fpvUptilt, false);
         this.applyCameraMode(this.cameraMode);
+    }
+
+    // The renderer owns the usable range and hands back what it actually applied, so the slider
+    // and the stored value can never drift past it.
+    setFpvUptilt(degrees, flash) {
+        this.fpvUptilt = this.renderer.setFpvUptilt(degrees);
+        localStorage.setItem('fpvUptilt', this.fpvUptilt);
+
+        if (this.elements.uptiltSlider) this.elements.uptiltSlider.value = this.fpvUptilt;
+        if (this.elements.uptiltValue) this.elements.uptiltValue.textContent = this.fpvUptilt;
+        if (flash) this.uptiltFlashUntil = performance.now() + 1500;
+    }
+
+    // Arrow keys in flight. Meaningless in Line of Sight - there is no onboard camera to tilt -
+    // so it is ignored there rather than changing something the pilot cannot see.
+    adjustFpvUptilt(delta) {
+        if (this.cameraMode !== 'fpv') return;
+        this.setFpvUptilt(this.fpvUptilt + delta, true);
     }
 
     applyCameraMode(mode) {
@@ -413,6 +446,9 @@ export class UIHandler {
             let throttleText = `THR: ${Math.round(axes.throttle * 100)}%`;
             if (this.cameraMode === 'los') {
                 throttleText += ` | DIST: ${this.renderer.getLosDistance().toFixed(0)} m`;
+            }
+            if (this.cameraMode === 'fpv' && performance.now() < this.uptiltFlashUntil) {
+                throttleText += ` | TILT: ${this.fpvUptilt}°`;
             }
             if (this.speedReadoutEnabled) {
                 const velocity = this.physics.droneBody.velocity;

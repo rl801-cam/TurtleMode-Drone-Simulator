@@ -79,7 +79,14 @@ contacts are resolved by a custom impulse solver rather than Cannon-es's narrowp
 - Adjustable surface grip and restitution.
 
 ### 3.5 Cameras
-- **FPV** — 90° FOV, mounted on the airframe with a 20° uptilt.
+- **FPV** — 90° FOV, mounted on the airframe.
+- **Camera uptilt**, 0–60°, default 10°. Real quads mount the camera tilted up because the
+  airframe has to pitch forward to move, so the tilt is what buys back the horizon: at 10° the
+  drone can lean 10° forward and still be looking straight ahead. Racers run 30–45° because the
+  faster you fly the further ahead you need to see. Adjustable from the menu slider or with the
+  **↑/↓** arrow keys in flight, in 1° steps, with the angle shown briefly on the OSD since the
+  menu is closed while flying. The setting persists, and Line of Sight ignores the arrow keys —
+  there is no onboard camera to tilt.
 - **Line of Sight** — the camera stands 5 m up and 3 m behind the spawn point and tracks the drone
   continuously, as a pilot watching from the ground does. Adjustable zoom (FOV), a distance readout
   on the OSD, and a visible airframe with red front props and white rear props so orientation stays
@@ -144,16 +151,24 @@ created on the Start button's click, the user gesture browsers require before au
 
 ### 3.9 Default Configuration
 Mass `0.5 kg` · Max thrust `25 N` (~5:1 TWR, hover near 20% throttle) · Air drag `0.5` ·
-Restitution `0.2` · Surface grip `0.2` · Wind `0.1` on all three axes · Video latency `0 ms`.
+Restitution `0.2` · Surface grip `0.2` · Wind `0.1` on all three axes · Video latency `0 ms` ·
+Camera uptilt `10°` · Default map `Bando`.
 
 ## 4. Verification
 
 `physics.js` and `audio.js` are deliberately free of DOM dependencies, so they can be driven
 headlessly under Node — against synthetic collision callbacks and a stubbed Web Audio API
-respectively; `latency.js` needs no stubbing at all. Harnesses covering landing and settling, wall
-and corner strikes, restitution accuracy, friction, wedged contacts, tunnelling at racing speed,
-wind gating, the audio mapping, and video-link delay were used throughout development and all
-pass.
+respectively; `latency.js` needs no stubbing at all. Seven harnesses, **165 checks**, covering
+landing and settling, wall and corner strikes, restitution accuracy, friction, wedged contacts,
+tunnelling at racing speed, wind gating, the audio mapping, video-link delay, and the camera
+uptilt convention. All pass.
+
+Every harness imports the **shipped** file — none keeps its own copy, and none falls back to one.
+A stale copy asserts against code that no longer exists, which is worse than not testing at all;
+it has already produced false results here once. `renderer.js` and `ui.js` cannot be imported
+under Node (they need the browser's import map for the Three.js addons), so their behaviour is
+checked by lifting the method under test out of the shipped source and executing it — if it is
+renamed or reshaped, the extraction fails and the test fails with it rather than quietly passing.
 
 **These harnesses are not currently committed.** Adding them under `tests/` is the cheapest way to
 protect the physics invariants documented in [`handoff.md`](handoff.md) — several of them are the

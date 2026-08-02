@@ -24,6 +24,13 @@ export class Renderer {
         this.fpvFov = 90;
         this.losFov = 50;
         this.cameraMode = 'fpv'; // 'fpv' | 'los'
+
+        // Onboard camera uptilt, in degrees. Real quads mount the camera tilted up because the
+        // airframe has to pitch forward to move: 10 is a gentle cruising angle, while racers run
+        // 30-45 since the faster you fly the further ahead you need to be looking.
+        this.fpvUptilt = 10;
+        this.minUptilt = 0;
+        this.maxUptilt = 60;
         this.camera = new THREE.PerspectiveCamera(this.fpvFov, window.innerWidth / window.innerHeight, 0.01, 1000);
 
         // Renderer setup
@@ -70,8 +77,7 @@ export class Renderer {
         this.cameraOffset = new THREE.Vector3(0, 0.05, -0.15); // Local offset
         this.droneMesh.add(this.camera);
         this.camera.position.copy(this.cameraOffset);
-        // Look forward with a 20 degree up tilt (typical FPV)
-        this.camera.rotation.set(THREE.MathUtils.degToRad(20), 0, 0);
+        this.applyFpvUptilt();
 
         // Line of Sight pilot position: standing a few metres behind the spawn point.
         // Spawn matches PhysicsEngine.reset() so the pilot always ends up next to the drone.
@@ -181,6 +187,21 @@ export class Renderer {
 
         this.camera.updateProjectionMatrix();
         this.resetCamera();
+    }
+
+    // Returns the angle actually applied, so the caller can display and store the clamped value
+    // rather than whatever it asked for.
+    setFpvUptilt(degrees) {
+        const wanted = Number.isFinite(degrees) ? degrees : this.fpvUptilt;
+        this.fpvUptilt = Math.min(this.maxUptilt, Math.max(this.minUptilt, wanted));
+        if (this.cameraMode === 'fpv') this.applyFpvUptilt();
+        return this.fpvUptilt;
+    }
+
+    // The camera looks down its local -Z, so rotating about +X lifts the forward vector to
+    // (0, sin, -cos) - a positive angle tilts the view up.
+    applyFpvUptilt() {
+        this.camera.rotation.set(THREE.MathUtils.degToRad(this.fpvUptilt), 0, 0);
     }
 
     setLosFov(fov) {
@@ -453,7 +474,7 @@ export class Renderer {
             return;
         }
         this.camera.position.copy(this.cameraOffset);
-        this.camera.rotation.set(THREE.MathUtils.degToRad(20), 0, 0);
+        this.applyFpvUptilt();
     }
 
     updateDrone(state) {
