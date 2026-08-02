@@ -196,6 +196,12 @@ export class Renderer {
         return this.losEye.distanceTo(this.droneMesh.position);
     }
 
+    // Distance from the listener to the drone, for audio attenuation. In FPV the camera rides the
+    // airframe, so the listener is effectively on the drone and there is nothing to attenuate.
+    getListenerDistance() {
+        return this.cameraMode === 'los' ? this.getLosDistance() : 0;
+    }
+
     // Keeps the LOS camera pinned near spawn and always aimed at the drone
     updateCamera() {
         if (this.cameraMode !== 'los') return;

@@ -19,6 +19,10 @@
 //      Distinct from the turbulence "wind" in physics.js, which is a disturbance torque; this is
 //      purely the sound of moving through air, and it is what makes speed audible.
 //
+// Everything then passes through a distance stage before the output. In FPV the listener rides the
+// airframe and it does nothing; in Line of Sight the pilot is standing on the ground watching, so
+// the drone gets quieter and duller as it flies away.
+//
 // Everything is synthesised, so there are no samples to load.
 
 export class AudioEngine {
@@ -37,6 +41,8 @@ export class AudioEngine {
         this.airFilter = null;
         this.noiseBuffer = null;
         this.master = null;
+        this.distanceGain = null;
+        this.distanceFilter = null;
 
         // Prop *rotation* rate. The audible pitch sits on the blade-pass harmonics above this.
         this.minFrequency = 55; // Hz at zero thrust
@@ -65,9 +71,21 @@ export class AudioEngine {
         this.airReferenceSpeed = 30; // m/s (~108 km/h) for full-scale wind noise
         this.airCurve = 1.5;
 
+        // Distance attenuation, used in Line of Sight. Inside the reference distance the drone is
+        // at full volume; beyond it the inverse-distance law takes over at -6 dB per doubling.
+        this.referenceDistance = 4; // m
+        this.minDistanceGain = 0.02; // never quite silent, however far it gets
+        // Air absorbs high frequencies with distance, which is most of why something far away
+        // sounds dull rather than merely quiet. The cutoff halves every this-many metres.
+        this.absorptionHalfDistance = 25; // m
+        this.minCutoff = 700; // Hz
+
         // Exponential smoothing time constant. Stick input arrives in discrete frames, and
         // stepping the parameters straight to their new values clicks audibly.
         this.smoothing = 0.05; // seconds
+        // Distance moves more slowly than the sticks, and a longer constant keeps a fast flyby
+        // from zippering
+        this.distanceSmoothing = 0.1; // seconds
     }
 
     // Relative strength of each harmonic of the rotation rate. Index 0 is DC and must stay zero.
@@ -85,9 +103,19 @@ export class AudioEngine {
             if (!Ctx) return; // no Web Audio support: the sim just stays silent
             this.ctx = new Ctx();
 
+            // Output chain: everything -> master -> air absorption -> distance gain -> out
+            this.distanceGain = this.ctx.createGain();
+            this.distanceGain.gain.value = 1;
+            this.distanceGain.connect(this.ctx.destination);
+
+            this.distanceFilter = this.ctx.createBiquadFilter();
+            this.distanceFilter.type = 'lowpass';
+            this.distanceFilter.frequency.value = this.distanceCutoffFor(0);
+            this.distanceFilter.connect(this.distanceGain);
+
             this.master = this.ctx.createGain();
             this.master.gain.value = 1;
-            this.master.connect(this.ctx.destination);
+            this.master.connect(this.distanceFilter);
 
             this.noiseBuffer = this.createNoiseBuffer();
             this.buildTone();
@@ -274,7 +302,21 @@ export class AudioEngine {
         return 600 + 2500 * level;
     }
 
-    update(axes, armed, speed) {
+    // Inverse-distance law: -6 dB per doubling once past the reference distance.
+    distanceGainFor(distance) {
+        if (!Number.isFinite(distance) || distance <= this.referenceDistance) return 1;
+        return Math.max(this.minDistanceGain, this.referenceDistance / distance);
+    }
+
+    // High frequencies are absorbed by air far faster than low ones, so a distant drone sounds
+    // dull as well as quiet. Without this, attenuation alone just sounds like a volume knob.
+    distanceCutoffFor(distance) {
+        if (!Number.isFinite(distance) || distance <= this.referenceDistance) return 20000;
+        const halvings = (distance - this.referenceDistance) / this.absorptionHalfDistance;
+        return Math.max(this.minCutoff, 20000 * Math.pow(0.5, halvings));
+    }
+
+    update(axes, armed, speed, listenerDistance) {
         if (!this.ctx || !this.enabled) return;
 
         const levels = this.motorLevels(axes, armed);
@@ -303,6 +345,13 @@ export class AudioEngine {
         const air = this.airLevel(speed);
         this.airGain.gain.setTargetAtTime(this.airGainFor(air), now, this.smoothing);
         this.airFilter.frequency.setTargetAtTime(this.airBandFor(air), now, this.smoothing);
+
+        // How far the listener is from the drone. Zero in FPV, where the camera rides the airframe.
+        const distance = listenerDistance || 0;
+        this.distanceGain.gain.setTargetAtTime(
+            this.distanceGainFor(distance), now, this.distanceSmoothing);
+        this.distanceFilter.frequency.setTargetAtTime(
+            this.distanceCutoffFor(distance), now, this.distanceSmoothing);
     }
 
     // Fade out without touching the oscillators, so sound can come straight back on resume

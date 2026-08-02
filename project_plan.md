@@ -113,6 +113,13 @@ chopped at blade-passage rate. Four layers:
   motors it is not gated on arming: a disarmed drone falling out of the sky still moves through
   air. Distinct from the turbulence *Wind* in the launch menu, which is a disturbance torque.
 
+Everything then passes through a **distance stage** before the output, so Line of Sight sounds
+like watching from the ground rather than riding along. Volume follows the inverse-distance law
+(−6 dB per doubling) past a 4 m reference, and an air-absorption lowpass halves its cutoff every
+25 m — a distant drone goes dull as well as quiet, which is most of what makes range audible.
+Both floor out rather than reaching silence. In FPV the listener rides the airframe, so the stage
+is bypassed entirely.
+
 Prop rotation runs 55–260 Hz, putting the blade tone near 165–780 Hz and the chop at the same rate.
 Amplitude and frequency remain linear in the throttle command. Silent when disarmed or paused,
 smoothed to avoid clicks on stick movement, and toggleable from the pause menu. The context is
@@ -167,7 +174,6 @@ kind of assumption a reasonable-looking refactor silently breaks.
 5. **Spawn points.** Spawn is hard-coded to `(0, 1, 0)`, and the LOS camera assumes ground at
    `y = 0`. Per-map spawn points would fix both.
 6. **Angle / horizon mode.** Acro only at present; a self-levelling mode makes day one possible.
-7. **Audio distance.** In Line of Sight mode a drone 50 m away is as loud as one at your feet;
-   attenuation and high-frequency rolloff with distance would help considerably. Doppler on the
-   wind layer would be a natural extension.
+7. **Doppler and propagation delay.** Distance attenuation is in; a delay line whose length
+   tracks range would add both the travel delay and Doppler shift on a fast flyby.
 8. **Gates and lap timing**, then replay/ghost — the training loop the simulator is ultimately for.

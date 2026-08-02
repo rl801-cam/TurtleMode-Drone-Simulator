@@ -83,9 +83,13 @@ Each of these was found the hard way. They are load-bearing.
 8. **`updateConfig()` merges nested objects.** `{ wind: { roll: true } }` leaves pitch and yaw
    untouched — correct for the per-axis checkboxes, but a trap in tests and callers that assume a
    full replacement.
-9. **Audio has two independent drivers.** Motor noise comes from the stick inputs and is gated
+9. **Audio has three independent drivers.** Motor noise comes from the stick inputs and is gated
     on arming; wind noise comes from `droneBody.velocity` and deliberately is not, since a
-    disarmed drone still falls through air. Do not collapse them onto one input.
+    disarmed drone still falls through air; distance attenuation comes from
+    `renderer.getListenerDistance()`, which is zero in FPV because the listener rides the
+    airframe. Do not collapse them onto one input. Attenuation sits on the master output so it
+    applies to every layer — adding a new layer means routing it through `master`, not to
+    `destination`.
 10. **The AudioContext must be created from a user gesture.** It is started inside
    `Simulator.start()`, which is reached synchronously from the Start button's click handler. Move
    it and audio silently never plays.
@@ -119,8 +123,8 @@ every tag and `BUILD` together after editing any module.
 6. **Line of Sight camera.** Fixed viewpoint near spawn that tracks the drone, with a visible
    airframe, distance readout, and `C` to toggle in flight.
 7. **Wind.** Low-pass filtered per-axis disturbance torque, suppressed on the ground.
-8. **Audio.** Synthesised chopped prop noise driven by the stick inputs, plus an airspeed-driven
-   wind layer so speed is audible on its own.
+8. **Audio.** Synthesised chopped prop noise driven by the stick inputs, an airspeed-driven wind
+   layer so speed is audible on its own, and distance attenuation in Line of Sight.
 
 ## Verification
 
@@ -150,9 +154,8 @@ most of them are exactly the kind of thing a well-meaning refactor quietly break
    camera assumes ground at `y = 0`; a map whose floor sits elsewhere would leave the viewpoint
    floating or buried. Per-map spawn points fix both. No crash detection or auto-reset yet.
 6. **Angle / horizon mode.** Acro only; a self-levelling mode makes day one possible.
-7. **Audio distance.** In LOS mode a drone 50 m away is as loud as one at your feet. Attenuation
-   and high-frequency rolloff with distance would help considerably, and Doppler on the wind layer
-   would follow naturally.
+7. **Doppler and propagation delay.** Distance attenuation is in; a delay line whose length
+   tracks range would add both the travel delay and the Doppler shift on a fast flyby.
 8. **Gates and lap timing**, then replay/ghost — the training loop the simulator is ultimately for.
 
 ---
