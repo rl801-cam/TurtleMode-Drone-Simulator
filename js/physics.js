@@ -80,6 +80,13 @@ export class PhysicsEngine {
         // normals agree to within this tolerance
         this.manifoldNormalTolerance = 0.9;
 
+        // Preallocated per-contact slots, reused every sub-step
+        this._contacts = this.contactPoints.map(() => ({
+            r: new CANNON.Vec3(),
+            normal: new CANNON.Vec3(),
+            normalImpulse: 0
+        }));
+
         // Preallocated manifold slots (at most one per contact point), reused every sub-step
         this._manifolds = this.contactPoints.map(() => ({
             refNormal: new CANNON.Vec3(), // normal of the first contact, used for grouping
@@ -87,10 +94,12 @@ export class PhysicsEngine {
             sumN: new CANNON.Vec3(),
             sumR: new CANNON.Vec3(),
             r: new CANNON.Vec3(),
+            sumR2: 0, // sum of |r|^2, for the patch radius
             count: 0,
             maxDepth: 0,
-            bias: 0,
-            normalImpulse: 0
+            closingSpeed: 0,
+            normalImpulse: 0,
+            patchRadius: 0
         }));
 
         this.currentAxes = null;
@@ -229,7 +238,8 @@ export class PhysicsEngine {
         // The impulse maths needs the inertia tensor in world space for the current attitude
         body.updateInertiaWorld(true);
 
-        // --- Pass 1: find contacts, grouped into manifolds by the surface they hit ---
+        // --- Pass 1: find contacts, and group them into manifolds by the surface they hit ---
+        let cCount = 0;
         let mCount = 0;
 
         for (const cp of this.contactPoints) {
@@ -247,6 +257,11 @@ export class PhysicsEngine {
             const nz = hit.normal.z;
             const depth = hit.depth;
 
+            const contact = this._contacts[cCount++];
+            contact.r.copy(s.r);
+            contact.normal.set(nx, ny, nz);
+            contact.normalImpulse = 0;
+
             let m = null;
             for (let i = 0; i < mCount; i++) {
                 const candidate = this._manifolds[i];
@@ -262,6 +277,7 @@ export class PhysicsEngine {
                 m.refNormal.set(nx, ny, nz);
                 m.sumN.set(0, 0, 0);
                 m.sumR.set(0, 0, 0);
+                m.sumR2 = 0;
                 m.count = 0;
                 m.maxDepth = 0;
                 m.normalImpulse = 0;
@@ -271,23 +287,29 @@ export class PhysicsEngine {
             m.sumN.y += ny;
             m.sumN.z += nz;
             m.sumR.vadd(s.r, m.sumR);
+            m.sumR2 += s.r.lengthSquared();
             m.count++;
             if (depth > m.maxDepth) m.maxDepth = depth;
         }
 
         if (mCount === 0) return false; // close to geometry, but nothing actually touching
 
-        // Reduce each manifold to one equivalent contact at the centroid of its points.
-        // Solving one impulse per *surface* rather than one per point is what keeps a square-on
-        // impact from tumbling: the centroid of a symmetric contact patch sits on the centre line
-        // and has no lever arm, while a lopsided patch - one motor catching a corner - does.
-        // Solving points individually instead injects spin that later contacts never take back out.
+        // Manifolds exist only to place the bounce and the push-out. Each is reduced to one
+        // equivalent contact at the centroid of its points, because that is what keeps a square-on
+        // impact from tumbling: a symmetric contact patch has its centroid on the centre line and
+        // so no lever arm, while a lopsided patch - one motor catching a corner - does.
         s.correction.set(0, 0, 0);
 
         for (let i = 0; i < mCount; i++) {
             const m = this._manifolds[i];
             m.sumN.scale(1 / m.sumN.length(), m.normal);
             m.sumR.scale(1 / m.count, m.r);
+            m.normalImpulse = 0;
+
+            // How far the contact points are spread around their centroid (RMS). A wide patch
+            // can resist tipping; a single point cannot, and gets a radius of zero.
+            const variance = m.sumR2 / m.count - m.r.lengthSquared();
+            m.patchRadius = Math.sqrt(Math.max(0, variance));
 
             // Accumulated push-out. Tracking what a normal has already been given stops a drone
             // wedged against two surfaces from being shoved out twice as far as it needs.
@@ -299,30 +321,29 @@ export class PhysicsEngine {
                 s.correction.z += m.normal.z * needed;
             }
 
-            // Bounce target is measured from the impact speed *before* anything is solved, so the
-            // iterations below can't pump energy back in. Slow contacts don't bounce at all, which
-            // is what lets a landed drone settle instead of buzzing against the floor.
+            // Measured before anything is solved, so the passes below cannot pump energy back in.
+            // Slow contacts do not bounce at all, which lets a landed drone settle.
             const vn0 = this.contactPointVelocity(m.r).dot(m.normal);
-            m.bias = -vn0 > this.restitutionThreshold ? -vn0 * this.params.restitution : 0;
+            m.closingSpeed = -vn0 > this.restitutionThreshold ? -vn0 : 0;
         }
 
         body.position.vadd(s.correction, body.position);
 
-        // --- Pass 2: sequential impulses, one per manifold ---
-        // Each manifold is solved against the velocity the previous ones left behind, so a few
-        // cheap iterations (no new BVH queries) let a drone wedged into a corner settle.
+        // --- Pass 2: non-penetration and friction, one solve per surface ---
+        // Per manifold rather than per contact point: solving points individually over-constrains
+        // three degrees of freedom with five contacts, which Gauss-Seidel cannot settle between
+        // sub-steps, and the asymmetric friction order tumbles a square-on impact.
         for (let iter = 0; iter < this.solverIterations; iter++) {
             for (let i = 0; i < mCount; i++) {
                 const contact = this._manifolds[i];
                 const n = contact.normal;
                 const r = contact.r;
 
-                // --- Normal impulse: stop the approach, plus any bounce ---
                 const vn = this.contactPointVelocity(r).dot(n);
-                if (vn < contact.bias) {
+                if (vn < 0) {
                     const kn = this.effectiveMass(r, n);
                     if (kn > 1e-9) {
-                        const jn = (contact.bias - vn) / kn;
+                        const jn = -vn / kn;
                         contact.normalImpulse += jn;
                         s.impulse.set(n.x * jn, n.y * jn, n.z * jn);
                         // Applying at an offset is what produces the angular kick on a corner hit
@@ -355,6 +376,57 @@ export class PhysicsEngine {
                 s.impulse.set(s.tangent.x * jt, s.tangent.y * jt, s.tangent.z * jt);
                 body.applyImpulse(s.impulse, r);
             }
+        }
+
+        // --- Pass 3: rolling resistance, the width of the contact patch ---
+        // A manifold is solved as one point, which cannot oppose rotation about an axis running
+        // through it - so a drone resting tilted would rock on its edge indefinitely, with nothing
+        // absorbing the energy. A real patch of contact resists tipping across its own width, so
+        // damp the rocking component of spin, bounded by how hard the surface is being pressed and
+        // how far the contact points actually spread. A single-point contact spreads zero and so
+        // resists nothing, and a hard crash is barely touched because the bound stays small.
+        for (let i = 0; i < mCount; i++) {
+            const m = this._manifolds[i];
+            if (m.normalImpulse <= 0 || m.patchRadius <= 1e-6) continue;
+
+            // Rocking = the part of the spin that is not about the surface normal
+            const w = body.angularVelocity;
+            const wn = w.dot(m.normal);
+            s.tangent.set(w.x - m.normal.x * wn, w.y - m.normal.y * wn, w.z - m.normal.z * wn);
+
+            const rockRate = s.tangent.length();
+            if (rockRate <= 1e-6) continue;
+
+            s.tangent.scale(1 / rockRate, s.tangent); // rocking axis
+
+            // Angular impulse that would stop the rocking outright
+            this.droneBody.invInertiaWorld.vmult(s.tangent, s.tmpA);
+            const kRock = s.tangent.dot(s.tmpA);
+            if (kRock <= 1e-9) continue;
+
+            const stopRock = rockRate / kRock;
+            const maxRock = this.params.friction * m.normalImpulse * m.patchRadius;
+            const jRock = -Math.min(stopRock, maxRock);
+
+            // Apply as a pure angular impulse: w += Iinv * (axis * jRock)
+            s.impulse.set(s.tangent.x * jRock, s.tangent.y * jRock, s.tangent.z * jRock);
+            this.droneBody.invInertiaWorld.vmult(s.impulse, s.tmpA);
+            body.angularVelocity.vadd(s.tmpA, body.angularVelocity);
+        }
+
+        // --- Pass 4: the bounce, once per surface, at the manifold centroid ---
+        // Applied after the approach has been stopped, so nothing cancels it, and placed at the
+        // centroid so a square-on hit rebounds straight while a corner hit spins.
+        for (let i = 0; i < mCount; i++) {
+            const m = this._manifolds[i];
+            if (m.closingSpeed <= 0) continue;
+
+            const k = this.effectiveMass(m.r, m.normal);
+            if (k <= 1e-9) continue;
+
+            const j = (m.closingSpeed * this.params.restitution) / k;
+            s.impulse.set(m.normal.x * j, m.normal.y * j, m.normal.z * j);
+            body.applyImpulse(s.impulse, m.r);
         }
 
         return true;
