@@ -11,8 +11,11 @@ class Simulator {
         this.physics = new PhysicsEngine();
         this.input = new InputHandler();
         
-        // Register collision check callback to evaluate inside the physics sub-step
-        this.physics.collisionCallback = (pos) => this.renderer.checkCollision(pos, 0.2);
+        // Register collision check callback to evaluate inside the physics sub-step.
+        // The physics engine drives the radius - it queries several contact spheres per sub-step.
+        this.physics.collisionCallback = (pos, radius) => this.renderer.checkCollision(pos, radius);
+        // Swept test, used only when the drone moves far enough in one sub-step to skip a surface
+        this.physics.sweepCallback = (from, to) => this.renderer.sweep(from, to);
         
         // Setup UI
         this.ui = new UIHandler(

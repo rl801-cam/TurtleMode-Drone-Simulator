@@ -230,12 +230,13 @@ export class UIHandler {
     }
 
     bindSliders() {
-        const bindSlider = (id, valId, callback) => {
+        const bindSlider = (id, valId, callback, decimals) => {
             const slider = document.getElementById(id);
             const valSpan = document.getElementById(valId);
+            const places = decimals !== undefined ? decimals : (id.includes('drag') ? 2 : 1);
             slider.addEventListener('input', (e) => {
                 const val = parseFloat(e.target.value);
-                valSpan.textContent = val.toFixed(id.includes('drag') ? 2 : 1);
+                valSpan.textContent = val.toFixed(places);
                 callback(val);
             });
         };
@@ -244,6 +245,10 @@ export class UIHandler {
         bindSlider('cfg-mass', 'val-mass', (val) => this.physics.updateConfig({ mass: val }));
         bindSlider('cfg-thrust', 'val-thrust', (val) => this.physics.updateConfig({ thrust: val }));
         bindSlider('cfg-drag', 'val-drag', (val) => this.physics.updateConfig({ drag: val }));
+
+        // Pause Menu (Crash Physics)
+        bindSlider('tune-bounce', 'val-bounce', (val) => this.physics.updateConfig({ restitution: val }), 2);
+        bindSlider('tune-friction', 'val-friction', (val) => this.physics.updateConfig({ friction: val }), 2);
 
         // Pause Menu (Rates)
         // Roll

@@ -162,6 +162,21 @@
                     </div>
                 </div>
             </div>
+            <div class="section crash-physics">
+                <h2>Crash Physics</h2>
+                <div class="rates-grid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;">
+                    <div class="slider-group">
+                        <label>Bounciness: <span id="val-bounce">0.35</span></label>
+                        <input type="range" id="tune-bounce" min="0" max="0.9" step="0.05" value="0.35">
+                    </div>
+                    <div class="slider-group">
+                        <label>Surface Grip: <span id="val-friction">0.50</span></label>
+                        <input type="range" id="tune-friction" min="0" max="1.5" step="0.05" value="0.5">
+                    </div>
+                </div>
+                <p class="small-text" style="margin-bottom: 0;">Bounciness is how much of an impact is given back. Grip decides whether the drone slides along a wall or catches and tumbles.</p>
+            </div>
+
             <div class="section performance">
                 <h2>Display & Performance</h2>
                 <div class="map-row" style="justify-content: flex-start; gap: 20px;">

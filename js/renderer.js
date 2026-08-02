@@ -85,7 +85,25 @@ export class Renderer {
         this.colliderMesh = null;
         this.collisionReady = false;
 
+        // Reused by checkCollision so the per-sub-step collision queries don't allocate
+        this._queryPoint = new THREE.Vector3();
+        this._queryTarget = { point: new THREE.Vector3(), distance: 0, faceIndex: -1 };
+        this._collisionResult = {
+            closestPoint: new THREE.Vector3(),
+            normal: new THREE.Vector3(),
+            dist: 0,
+            depth: 0
+        };
+        this._sweepRay = new THREE.Ray();
+        this._sweepDir = new THREE.Vector3();
+        this._sweepResult = {
+            point: new THREE.Vector3(),
+            normal: new THREE.Vector3(),
+            distance: 0
+        };
+
         this.currentMapName = null;
+        this.mapLoadPromise = null;
         this.loadMap('placeholder');
 
         // Handle Resize
@@ -98,13 +116,20 @@ export class Renderer {
         // fog is disabled on the drone so it doesn't fade into the sky when flown far away in LOS.
         const group = new THREE.Group();
 
+        // The airframe hangs 0.02 below the origin so its underside lines up with the bottom of
+        // the physics contact spheres (radius 0.05, centred on the CoM plane) and it looks like
+        // it is sitting on the ground rather than hovering over it.
+        const frame = new THREE.Group();
+        frame.position.y = -0.02;
+        group.add(frame);
+
         const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.6, fog: false });
         const frontMat = new THREE.MeshStandardMaterial({ color: 0xff3322, emissive: 0x551108, roughness: 0.5, fog: false });
         const rearMat = new THREE.MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.5, fog: false });
 
         const body = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.06, 0.2), bodyMat);
         body.castShadow = true;
-        group.add(body);
+        frame.add(body);
 
         const armGeo = new THREE.BoxGeometry(0.022, 0.012, 0.14);
         const propGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.008, 12);
@@ -122,12 +147,12 @@ export class Renderer {
             arm.position.set(m.x * 0.5, 0, m.z * 0.5);
             arm.rotation.y = Math.atan2(m.x, m.z); // point the arm's local +Z at the motor
             arm.castShadow = true;
-            group.add(arm);
+            frame.add(arm);
 
             const prop = new THREE.Mesh(propGeo, m.front ? frontMat : rearMat);
             prop.position.set(m.x, 0.035, m.z);
             prop.castShadow = true;
-            group.add(prop);
+            frame.add(prop);
         }
 
         return group;
@@ -171,10 +196,20 @@ export class Renderer {
         this.camera.lookAt(this.droneMesh.position);
     }
 
-    async loadMap(mapName) {
-        if (this.currentMapName === mapName) return;
-        this.currentMapName = mapName;
+    // Returns the in-flight load for a map that is already loading/loaded, so callers always
+    // await a ready collision tree - the drone has nothing else holding it up.
+    loadMap(mapName) {
+        if (this.currentMapName !== mapName) {
+            this.currentMapName = mapName;
+            this.mapLoadPromise = this.buildMap(mapName).catch((err) => {
+                this.currentMapName = null; // let a failed map be retried
+                throw err;
+            });
+        }
+        return this.mapLoadPromise;
+    }
 
+    async buildMap(mapName) {
         // Clear existing map
         while(this.environmentGroup.children.length > 0) { 
             const child = this.environmentGroup.children[0];
@@ -323,38 +358,73 @@ export class Renderer {
         });
     }
 
-    checkCollision(position, radius) {
+    // Sweeps a ray along the path the drone travelled during one physics sub-step. At racing
+    // speeds the drone can move further than a contact sphere's radius between sub-steps and
+    // step clean over a surface, so the sphere checks alone would let it through the world.
+    sweep(from, to) {
         if (!this.collisionReady || !this.colliderMesh) return null;
-        
+
         const boundsTree = this.colliderMesh.geometry.boundsTree;
         if (!boundsTree) return null;
-        
-        const targetObj = {};
-        const posVec = new THREE.Vector3(position.x, position.y, position.z);
-        const result = boundsTree.closestPointToPoint(posVec, targetObj);
-        
-        if (result && result.distance < radius) {
-            // Collision detected!
-            const dist = result.distance;
-            const closestPoint = result.point;
-            const depth = radius - dist;
-            const normal = new THREE.Vector3().subVectors(posVec, closestPoint);
-            if (normal.lengthSq() > 0.0001) {
-                normal.normalize();
-            } else {
-                // Default fallback normal
-                normal.set(0, 1, 0);
-            }
-            
-            return {
-                closestPoint,
-                dist,
-                depth,
-                normal
-            };
+
+        this._sweepRay.origin.set(from.x, from.y, from.z);
+        this._sweepDir.set(to.x - from.x, to.y - from.y, to.z - from.z);
+
+        const travel = this._sweepDir.length();
+        if (travel < 1e-6) return null;
+
+        this._sweepDir.multiplyScalar(1 / travel);
+        this._sweepRay.direction.copy(this._sweepDir);
+
+        // DoubleSide so a surface is caught regardless of which way its triangles are wound
+        const hit = boundsTree.raycastFirst(this._sweepRay, THREE.DoubleSide);
+        if (!hit || hit.distance > travel) return null;
+
+        const result = this._sweepResult;
+        result.point.copy(hit.point);
+        result.distance = hit.distance;
+
+        if (hit.face && hit.face.normal) {
+            result.normal.copy(hit.face.normal);
+            // Winding is not guaranteed, so force the normal to face back along the travel
+            if (result.normal.dot(this._sweepDir) > 0) result.normal.negate();
+        } else {
+            result.normal.copy(this._sweepDir).negate();
         }
-        
-        return null;
+
+        return result;
+    }
+
+    // Queries the map BVH for a sphere overlap. The physics solver calls this several times per
+    // sub-step, so the result is a single reused object - callers must read it before querying
+    // again. Returns null when the sphere is clear of the geometry.
+    checkCollision(position, radius) {
+        if (!this.collisionReady || !this.colliderMesh) return null;
+
+        const boundsTree = this.colliderMesh.geometry.boundsTree;
+        if (!boundsTree) return null;
+
+        const posVec = this._queryPoint.set(position.x, position.y, position.z);
+
+        // Passing radius as maxThreshold lets the BVH discard whole branches instead of
+        // walking the tree for the true closest point every time.
+        const result = boundsTree.closestPointToPoint(posVec, this._queryTarget, 0, radius);
+        if (!result || result.distance >= radius) return null;
+
+        const hit = this._collisionResult;
+        hit.closestPoint.copy(result.point);
+        hit.dist = result.distance;
+        hit.depth = radius - result.distance;
+
+        hit.normal.subVectors(posVec, result.point);
+        if (hit.normal.lengthSq() > 1e-8) {
+            hit.normal.normalize();
+        } else {
+            // Sphere centre sits exactly on the surface - no usable direction, push up
+            hit.normal.set(0, 1, 0);
+        }
+
+        return hit;
     }
 
     onWindowResize() {
