@@ -246,7 +246,6 @@ export class UIHandler {
         bindSlider('cfg-thrust', 'val-thrust', (val) => this.physics.updateConfig({ thrust: val }));
         bindSlider('cfg-drag', 'val-drag', (val) => this.physics.updateConfig({ drag: val }));
         bindSlider('cfg-restitution', 'val-restitution', (val) => this.physics.updateConfig({ restitution: val }), 2);
-        // Surface grip lives with Map Selection - it is a property of the map's surfaces
         bindSlider('cfg-friction', 'val-friction', (val) => this.physics.updateConfig({ friction: val }), 2);
 
         // Pause Menu (Rates)
