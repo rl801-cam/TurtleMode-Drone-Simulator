@@ -245,9 +245,9 @@ export class UIHandler {
         bindSlider('cfg-mass', 'val-mass', (val) => this.physics.updateConfig({ mass: val }));
         bindSlider('cfg-thrust', 'val-thrust', (val) => this.physics.updateConfig({ thrust: val }));
         bindSlider('cfg-drag', 'val-drag', (val) => this.physics.updateConfig({ drag: val }));
+        bindSlider('cfg-restitution', 'val-restitution', (val) => this.physics.updateConfig({ restitution: val }), 2);
 
         // Pause Menu (Crash Physics)
-        bindSlider('tune-bounce', 'val-bounce', (val) => this.physics.updateConfig({ restitution: val }), 2);
         bindSlider('tune-friction', 'val-friction', (val) => this.physics.updateConfig({ friction: val }), 2);
 
         // Pause Menu (Rates)
