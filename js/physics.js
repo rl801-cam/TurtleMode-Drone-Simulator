@@ -17,6 +17,13 @@ export class PhysicsEngine {
             drag: 0.2, // Linear & Angular dampening
             restitution: 0.35, // How much energy a frame/prop strike gives back
             friction: 0.5, // Coulomb friction coefficient at contact points
+            wind: {
+                // Gentle random torque per body axis, off until the pilot opts in
+                roll: false,
+                pitch: false,
+                yaw: false,
+                strength: 0.3 // 0..1, scaled by windMaxTorque below
+            },
             rates: {
                 roll: { center: 200, max: 600, expo: 0.5 },
                 pitch: { center: 200, max: 600, expo: 0.5 },
@@ -66,6 +73,9 @@ export class PhysicsEngine {
         this.penetrationCorrection = 0.8;
         this.solverIterations = 3;
 
+        // Fixed internal sub-step. Every per-sub-step calculation below assumes this rate.
+        this.fixedTimeStep = 1 / 120;
+
         // Contact points that hit the same flat surface are merged into one manifold when their
         // normals agree to within this tolerance
         this.manifoldNormalTolerance = 0.9;
@@ -89,10 +99,23 @@ export class PhysicsEngine {
         // Apply continuous forces per physics sub-step using World events
         // This is guaranteed to run before every single internal integration step.
         this.world.addEventListener('preStep', () => {
-            if (this.isArmed && this.currentAxes) {
-                this.applyInputsInternal(this.currentAxes);
+            if (this.isArmed) {
+                if (this.currentAxes) this.applyInputsInternal(this.currentAxes);
+                this.applyWind();
             }
         });
+
+        // Wind. Torque at full strength, per kg of airframe - scaling by mass keeps the same
+        // slider setting feeling the same on a light and a heavy drone.
+        this.windMaxTorque = 0.04; // N.m per kg
+        this.windGustTau = 0.8; // seconds for a gust to shift; larger = slower, lazier air
+        this._windState = { roll: 0, pitch: 0, yaw: 0 };
+
+        // Wind is white noise run through a first-order low-pass, so it wanders instead of
+        // buzzing. Filtering shrinks the amplitude, so windGain restores it: without this the
+        // strength slider would barely do anything.
+        this._windBlend = 1 - Math.exp(-this.fixedTimeStep / this.windGustTau);
+        this._windGain = Math.sqrt((2 - this._windBlend) / this._windBlend);
 
         this.collisionCallback = null;
         this.sweepCallback = null;
@@ -330,6 +353,9 @@ export class PhysicsEngine {
         }
         if (config.restitution !== undefined) this.params.restitution = config.restitution;
         if (config.friction !== undefined) this.params.friction = config.friction;
+        if (config.wind !== undefined) {
+            this.params.wind = { ...this.params.wind, ...config.wind };
+        }
         if (config.rates !== undefined) {
             for (let axis in config.rates) {
                 if (this.params.rates[axis]) {
@@ -347,11 +373,46 @@ export class PhysicsEngine {
         this.droneBody.angularVelocity.set(0, 0, 0);
         // Re-seed the sweep origin, or the next sub-step would sweep from the pre-reset position
         this._prevPosition.copy(this.droneBody.position);
+        // Start calm rather than mid-gust
+        this._windState.roll = 0;
+        this._windState.pitch = 0;
+        this._windState.yaw = 0;
     }
 
     setInputs(axes, armed) {
         this.currentAxes = axes;
         this.isArmed = armed;
+    }
+
+    // A light, slowly shifting breeze. Each enabled body axis gets its own drifting torque,
+    // small enough that the flight controller mostly holds it but you feel the drone wander.
+    applyWind() {
+        const wind = this.params.wind;
+        if (wind.strength <= 0) return;
+        if (!wind.roll && !wind.pitch && !wind.yaw) return;
+
+        const maxTorque = wind.strength * this.windMaxTorque * this.params.mass;
+
+        // Advance one axis of the low-pass filtered noise and return its torque
+        const gust = (axis, enabled) => {
+            if (!enabled) {
+                this._windState[axis] = 0;
+                return 0;
+            }
+            const noise = (Math.random() * 2 - 1) * this._windGain;
+            this._windState[axis] += this._windBlend * (noise - this._windState[axis]);
+            // The filtered signal occasionally overshoots, so hold it inside the slider's range
+            return Math.max(-1, Math.min(1, this._windState[axis])) * maxTorque;
+        };
+
+        // Local axes match applyInputsInternal: x = pitch, y = yaw, z = roll
+        const localTorque = new CANNON.Vec3(
+            gust('pitch', wind.pitch),
+            gust('yaw', wind.yaw),
+            gust('roll', wind.roll)
+        );
+
+        this.droneBody.applyTorque(this.droneBody.quaternion.vmult(localTorque));
     }
 
     applyInputsInternal(axes) {
@@ -406,7 +467,7 @@ export class PhysicsEngine {
     }
 
     step(dt) {
-        this.world.step(1 / 120, dt, 20);
+        this.world.step(this.fixedTimeStep, dt, 20);
     }
 
     getDroneState() {

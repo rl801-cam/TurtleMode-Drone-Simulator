@@ -247,6 +247,19 @@ export class UIHandler {
         bindSlider('cfg-drag', 'val-drag', (val) => this.physics.updateConfig({ drag: val }));
         bindSlider('cfg-restitution', 'val-restitution', (val) => this.physics.updateConfig({ restitution: val }), 2);
         bindSlider('cfg-friction', 'val-friction', (val) => this.physics.updateConfig({ friction: val }), 2);
+        bindSlider('cfg-wind', 'val-wind', (val) => this.physics.updateConfig({ wind: { strength: val } }), 2);
+
+        // Wind axis toggles
+        const bindWindAxis = (id, axis) => {
+            const checkbox = document.getElementById(id);
+            if (!checkbox) return;
+            checkbox.addEventListener('change', (e) => {
+                this.physics.updateConfig({ wind: { [axis]: e.target.checked } });
+            });
+        };
+        bindWindAxis('wind-roll', 'roll');
+        bindWindAxis('wind-pitch', 'pitch');
+        bindWindAxis('wind-yaw', 'yaw');
 
         // Pause Menu (Rates)
         // Roll
