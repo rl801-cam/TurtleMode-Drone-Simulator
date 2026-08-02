@@ -42,6 +42,7 @@ export class UIHandler {
 
             viewMode: document.getElementById('view-mode'),
             losOptions: document.getElementById('los-options'),
+            fpvOptions: document.getElementById('fpv-options'),
             losFovSlider: document.getElementById('cfg-los-fov'),
             losFovValue: document.getElementById('val-los-fov')
         };
@@ -78,6 +79,11 @@ export class UIHandler {
         if (this.elements.viewMode) this.elements.viewMode.value = this.cameraMode;
         if (this.elements.losOptions) {
             this.elements.losOptions.style.display = this.cameraMode === 'los' ? 'block' : 'none';
+        }
+        // Video latency is a property of the feed, and in Line of Sight there is no feed - the
+        // pilot is watching the drone itself. Hide it rather than leave a control that does nothing.
+        if (this.elements.fpvOptions) {
+            this.elements.fpvOptions.style.display = this.cameraMode === 'los' ? 'none' : 'block';
         }
         // The FPV crosshair is meaningless when watching from the ground
         this.elements.osd.classList.toggle('los-view', this.cameraMode === 'los');

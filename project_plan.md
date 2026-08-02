@@ -28,7 +28,7 @@ hosted on GitHub Pages.
 | `js/input.js` | Gamepad polling, axis mapping, deadband, arm switch |
 | `js/ui.js` | DOM bindings, menus, slider-to-physics wiring, map upload |
 | `js/audio.js` | Motor tone synthesis |
-| `js/latency.js` | Artificial control-link delay |
+| `js/latency.js` | Artificial video-link delay |
 
 **Module caching:** `index.html` and the imports in `main.js` carry a `?v=N` cache-busting tag, and
 the running build is logged to the console and shown in the launch menu. Bump every tag together
@@ -44,12 +44,6 @@ anything that looks like an unapplied change.
   visualiser and axis bars for verification.
 - Configurable arm button; a disarmed drone receives no thrust and makes no sound.
 - 5% deadband, rescaled so the usable stick range stays full.
-- **Control latency**, 0–200 ms. Commands are buffered and delivered late, so the drone reacts the
-  way it does over a real radio link (about 20–40 ms end to end; more is what a congested or
-  long-range link feels like). The delayed signal is interpolated between frames rather than
-  quantised to them, and the arm switch is delayed alongside the sticks but never blended. The
-  motors follow the delayed command, so latency is audible as well as felt. The stick visualiser
-  deliberately stays live, since it exists to verify the transmitter.
 
 ### 3.2 Flight Model
 - Fixed 120 Hz physics sub-step. Thrust and control torque are injected through Cannon-es's
@@ -91,6 +85,15 @@ contacts are resolved by a custom impulse solver rather than Cannon-es's narrowp
   on the OSD, and a visible airframe with red front props and white rear props so orientation stays
   readable at range.
 - `C` switches view in flight; the choice persists across sessions.
+- **Video latency**, 0–200 ms. The FPV feed is buffered and shown late, so the picture trails the
+  drone the way a real video link does — analog about 20–30 ms glass to glass, digital 30–40, and
+  past 100 ms is a link in trouble. Only the *view* lags: the sticks reach the flight model at
+  once and the physics runs live, so the drone really is where the solver says it is and you crash
+  into things that were already there. The delayed pose is interpolated between frames rather than
+  snapped to the nearest one, position by lerp and attitude by shortest-arc slerp. Line of Sight
+  ignores the setting entirely — the pilot is watching the airframe itself, not a feed — and audio
+  is never delayed either, since a quad carries no microphone and the sound reaches the pilot
+  through the air.
 
 ### 3.6 Wind
 Per-axis (roll / pitch / yaw) random disturbance torque, on by default. White noise is passed
@@ -141,7 +144,7 @@ created on the Start button's click, the user gesture browsers require before au
 
 ### 3.9 Default Configuration
 Mass `0.5 kg` · Max thrust `25 N` (~5:1 TWR, hover near 20% throttle) · Air drag `0.5` ·
-Restitution `0.2` · Surface grip `0.2` · Wind `0.1` on all three axes · Control latency `0 ms`.
+Restitution `0.2` · Surface grip `0.2` · Wind `0.1` on all three axes · Video latency `0 ms`.
 
 ## 4. Verification
 
@@ -149,7 +152,7 @@ Restitution `0.2` · Surface grip `0.2` · Wind `0.1` on all three axes · Contr
 headlessly under Node — against synthetic collision callbacks and a stubbed Web Audio API
 respectively; `latency.js` needs no stubbing at all. Harnesses covering landing and settling, wall
 and corner strikes, restitution accuracy, friction, wedged contacts, tunnelling at racing speed,
-wind gating, the audio mapping, and control-link delay were used throughout development and all
+wind gating, the audio mapping, and video-link delay were used throughout development and all
 pass.
 
 **These harnesses are not currently committed.** Adding them under `tests/` is the cheapest way to

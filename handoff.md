@@ -30,11 +30,11 @@ up across framerates.
 * **`js/input.js`** — Gamepad API, axis mapping, deadband, reversing, arm switch.
 * **`js/ui.js`** — DOM bindings, menus, slider-to-physics wiring, custom map upload.
 * **`js/audio.js`** — synthesised motor and prop noise.
-* **`js/latency.js`** — artificial control-link delay. Pure and DOM-free, so it tests directly.
+* **`js/latency.js`** — artificial video-link delay. Pure and DOM-free, so it tests directly.
 
 ### Default configuration
 Mass `0.5 kg` · Max thrust `25 N` (~5:1 TWR, hover near 20% throttle) · Air drag `0.5` ·
-Restitution `0.2` · Surface grip `0.2` · Wind `0.1` on all three axes · Control latency `0 ms`.
+Restitution `0.2` · Surface grip `0.2` · Wind `0.1` on all three axes · Video latency `0 ms`.
 
 Defaults live in **two places that must agree**: `params` in `physics.js` and the `value=`
 attributes plus readout spans in `index.html`. There is no persistence layer, so these are what
@@ -94,11 +94,18 @@ Each of these was found the hard way. They are load-bearing.
 10. **The AudioContext must be created from a user gesture.** It is started inside
    `Simulator.start()`, which is reached synchronously from the Start button's click handler. Move
    it and audio silently never plays.
-11. **Control latency stores copies, not references.** `InputHandler.getAxes()` returns one
-    object that it mutates in place every frame, so holding it would make every queued sample the
-    current one and the delay would silently do nothing. `ControlDelay.push()` copies the values
-    out. The queue is also cleared on reset, or commands from before the teleport still arrive
-    after it.
+11. **Video latency delays the view only, and only in FPV.** `physics.setInputs()` takes the live
+    sticks and the solver runs live — the drone is genuinely where the physics says, the pilot
+    just finds out late, which is the whole point. The delay is applied to the pose handed to
+    `renderer.updateDrone()`, and in FPV the camera is a child of the drone mesh, so delaying the
+    mesh delays the picture exactly. In Line of Sight the mesh must stay live: the pilot is
+    watching the real airframe with their own eyes and there is no feed to lag. Audio stays live
+    for the same reason. Two further traps: `VideoDelay.push()` copies the components out because
+    the physics body mutates its position and quaternion in place — holding the object would make
+    every stored frame the current one and the delay would silently do nothing; and attitude is
+    interpolated with shortest-arc slerp, since componentwise blending of quaternions leaves an
+    unnormalised one that shears the whole picture. The buffer is cleared on reset, or the view
+    replays the old flight after the teleport.
 12. **Turbulence wind is suppressed while the drone is touching a surface**, with a short grace
     period so contact flicker on uneven map geometry does not let it back in. Note the naming: the
     *wind* in `physics.js` is a disturbance torque, while `air*` in `audio.js` is the sound of
@@ -131,7 +138,8 @@ every tag and `BUILD` together after editing any module.
 7. **Wind.** Low-pass filtered per-axis disturbance torque, suppressed on the ground.
 8. **Audio.** Synthesised chopped prop noise driven by the stick inputs, an airspeed-driven wind
    layer so speed is audible on its own, and distance attenuation in Line of Sight.
-9. **Control latency.** Adjustable 0–200 ms link delay between sticks and flight model.
+9. **Video latency.** Adjustable 0–200 ms FPV feed delay. The view lags; the controls and the
+   physics do not.
 
 ## Verification
 

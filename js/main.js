@@ -3,17 +3,17 @@
 // The ?v= tags are cache busters, matching the one on style.css. Browsers cache ES modules
 // aggressively, so without them an edited module can keep running from cache against fresh
 // HTML. Bump every one of these (and the two in index.html) together after changing any file.
-import { Renderer } from './renderer.js?v=17';
-import { PhysicsEngine } from './physics.js?v=17';
-import { InputHandler } from './input.js?v=17';
-import { UIHandler } from './ui.js?v=17';
-import { AudioEngine } from './audio.js?v=17';
-import { ControlDelay } from './latency.js?v=17';
+import { Renderer } from './renderer.js?v=18';
+import { PhysicsEngine } from './physics.js?v=18';
+import { InputHandler } from './input.js?v=18';
+import { UIHandler } from './ui.js?v=18';
+import { AudioEngine } from './audio.js?v=18';
+import { VideoDelay } from './latency.js?v=18';
 
 // Shown in the launch menu and logged on boot. index.html itself carries no cache buster, so a
 // browser holding a stale copy of it will keep loading the old ?v= modules and none of the tags
 // above will help. If this does not match the newest version, the page needs a hard reload.
-const BUILD = 'v17';
+const BUILD = 'v18';
 
 class Simulator {
     constructor() {
@@ -21,7 +21,7 @@ class Simulator {
         this.physics = new PhysicsEngine();
         this.input = new InputHandler();
         this.audio = new AudioEngine();
-        this.controlDelay = new ControlDelay();
+        this.videoDelay = new VideoDelay();
         
         // Register collision check callback to evaluate inside the physics sub-step.
         // The physics engine drives the radius - it queries several contact spheres per sub-step.
@@ -76,14 +76,14 @@ class Simulator {
             });
         }
 
-        // Control latency
+        // Video latency
         const latencySlider = document.getElementById('cfg-latency');
         const latencyValue = document.getElementById('val-latency');
         if (latencySlider) {
             latencySlider.addEventListener('input', (e) => {
                 const ms = parseInt(e.target.value, 10) || 0;
                 latencyValue.textContent = ms;
-                this.controlDelay.setLatency(ms / 1000);
+                this.videoDelay.setLatency(ms / 1000);
             });
         }
 
@@ -122,7 +122,7 @@ class Simulator {
 
         this.state = 'PLAYING';
         this.lastTime = performance.now();
-        this.controlDelay.clear();
+        this.videoDelay.clear();
         this.renderer.resetCamera();
         await this.renderer.loadMap(mapChoice);
     }
@@ -141,8 +141,8 @@ class Simulator {
 
     reset() {
         this.physics.reset();
-        // Drop queued commands, or input from before the teleport would still arrive afterwards
-        this.controlDelay.clear();
+        // Drop the buffered feed, or the view would replay the old flight after the teleport
+        this.videoDelay.clear();
         this.state = 'PLAYING';
         this.lastTime = performance.now();
         this.renderer.resetCamera();
@@ -189,30 +189,37 @@ class Simulator {
         this.ui.updateDashboard(axes, armed);
 
         if (this.state === 'PLAYING') {
-            // 3. Run the sticks through the control link, then set physics inputs (applied
-            // continuously in body.preStep). At zero latency this hands back the live input.
-            this.controlDelay.push(axes, armed, now / 1000);
-            const command = this.controlDelay.sample(now / 1000) || { axes, armed };
-            this.physics.setInputs(command.axes, command.armed);
-            
+            // 3. Set physics inputs (applied continuously in body.preStep). The sticks are never
+            // delayed - they reach the flight controller at once, as they do on a real quad.
+            this.physics.setInputs(axes, armed);
+
             // 4. Step Physics Engine (sub-steps inside this method will fire the 'postStep' listener and handle collisions)
             // Cap dt to prevent huge jumps if tab was inactive
             this.physics.step(Math.min(dt, 0.1));
-            
-            // 5. Sync Renderer with Physics
+
+            // 5. Sync Renderer with Physics, through the video link.
+            // In FPV the camera rides the airframe, so showing a past pose is exactly what a
+            // laggy feed looks like: the drone is already somewhere else by the time you see it.
+            // In Line of Sight the pilot is watching the real drone with their own eyes and there
+            // is no video link to lag, so the mesh stays live.
             const droneState = this.physics.getDroneState();
-            this.renderer.updateDrone(droneState);
+            this.videoDelay.push(droneState, now / 1000);
+            const seen = this.renderer.cameraMode === 'fpv'
+                ? (this.videoDelay.sample(now / 1000) || droneState)
+                : droneState;
+            this.renderer.updateDrone(seen);
 
             // 6. Aim the camera (no-op in FPV, where the camera rides on the drone)
             this.renderer.updateCamera();
 
             // 7. Motor noise follows the stick inputs; wind noise follows how fast the
             // airframe is actually moving through the air
-            // In Line of Sight the pilot is on the ground, so the drone is attenuated by range
-            // The motors follow the delayed command, not the sticks, so latency is audible too
+            // In Line of Sight the pilot is on the ground, so the drone is attenuated by range.
+            // Sound is never delayed by the video setting - a quad carries no microphone, you are
+            // hearing the real thing through the air while the picture lags behind it.
             this.audio.update(
-                command.axes,
-                command.armed,
+                axes,
+                armed,
                 this.physics.droneBody.velocity.length(),
                 this.renderer.getListenerDistance()
             );
