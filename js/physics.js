@@ -134,9 +134,12 @@ export class PhysicsEngine {
         // sub-step has a path to sweep
         this._prevPosition = this.droneBody.position.clone();
 
+        // Whether the drone was touching a surface at the end of the last sub-step
+        this._inContact = false;
+
         // Perform collision check and resolution immediately after every internal physics sub-step
         this.world.addEventListener('postStep', () => {
-            this.resolveCollisions();
+            this._inContact = this.resolveCollisions();
             // Recorded after resolution so the next sub-step sweeps from where the drone
             // actually ended up, not from a position it was pushed out of
             this._prevPosition.copy(this.droneBody.position);
@@ -202,8 +205,9 @@ export class PhysicsEngine {
         );
     }
 
+    // Returns true when the drone is touching a surface this sub-step.
     resolveCollisions() {
-        if (!this.collisionCallback) return;
+        if (!this.collisionCallback) return false;
 
         const body = this.droneBody;
         const s = this._scratch;
@@ -211,7 +215,7 @@ export class PhysicsEngine {
         this.applyContinuousCollision();
 
         // Broad phase: one sphere around the whole airframe. Most sub-steps end here.
-        if (!this.collisionCallback(body.position, this.broadPhaseRadius)) return;
+        if (!this.collisionCallback(body.position, this.broadPhaseRadius)) return false;
 
         // The impulse maths needs the inertia tensor in world space for the current attitude
         body.updateInertiaWorld(true);
@@ -262,7 +266,7 @@ export class PhysicsEngine {
             if (depth > m.maxDepth) m.maxDepth = depth;
         }
 
-        if (mCount === 0) return; // close to geometry, but nothing actually touching
+        if (mCount === 0) return false; // close to geometry, but nothing actually touching
 
         // Reduce each manifold to one equivalent contact at the centroid of its points.
         // Solving one impulse per *surface* rather than one per point is what keeps a square-on
@@ -343,6 +347,8 @@ export class PhysicsEngine {
                 body.applyImpulse(s.impulse, r);
             }
         }
+
+        return true;
     }
 
     updateConfig(config) {
@@ -379,6 +385,7 @@ export class PhysicsEngine {
         this.droneBody.angularVelocity.set(0, 0, 0);
         // Re-seed the sweep origin, or the next sub-step would sweep from the pre-reset position
         this._prevPosition.copy(this.droneBody.position);
+        this._inContact = false;
         // Start calm rather than mid-gust
         this._windState.roll = 0;
         this._windState.pitch = 0;
@@ -393,6 +400,10 @@ export class PhysicsEngine {
     // A light, slowly shifting breeze. Each enabled body axis gets its own drifting torque,
     // small enough that the flight controller mostly holds it but you feel the drone wander.
     applyWind() {
+        // A drone sitting on the ground or propped against a wall is held there by the surface.
+        // Turbulence should only push it around once it is actually flying.
+        if (this._inContact) return;
+
         const wind = this.params.wind;
         if (wind.strength <= 0) return;
         if (!wind.roll && !wind.pitch && !wind.yaw) return;
