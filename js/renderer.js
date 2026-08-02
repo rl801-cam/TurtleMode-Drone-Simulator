@@ -78,7 +78,7 @@ export class Renderer {
         // Eye height is measured from the ground rather than offset from the spawn, so it stays
         // put if the drone's spawn altitude ever changes.
         this.spawnPosition = new THREE.Vector3(0, 1, 0);
-        this.losEyeHeight = 1.5; // metres above ground
+        this.losEyeHeight = 5; // metres above ground
         this.losStandoff = 3; // metres behind the spawn point
         this.losEye = new THREE.Vector3(
             this.spawnPosition.x,

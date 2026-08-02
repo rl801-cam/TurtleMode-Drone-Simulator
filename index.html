@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TurtleMode Simulator</title>
-    <link rel="stylesheet" href="css/style.css?v=9">
+    <link rel="stylesheet" href="css/style.css?v=10">
     <!-- Import maps for ES modules to load Three.js and Cannon-es cleanly -->
     <script type="importmap">
         {
@@ -114,9 +114,9 @@
                 <h2>Wind</h2>
                 <p class="small-text" style="text-align: left;">A light, slowly shifting breeze that nudges the drone on the axes you enable. Small enough to fly through, big enough to keep you working.</p>
                 <div class="map-row" style="justify-content: flex-start; gap: 25px;">
-                    <label class="rev-check" style="flex: unset !important;"><input type="checkbox" id="wind-roll"> Roll</label>
-                    <label class="rev-check" style="flex: unset !important;"><input type="checkbox" id="wind-pitch"> Pitch</label>
-                    <label class="rev-check" style="flex: unset !important;"><input type="checkbox" id="wind-yaw"> Yaw</label>
+                    <label class="rev-check" style="flex: unset !important;"><input type="checkbox" id="wind-roll" checked> Roll</label>
+                    <label class="rev-check" style="flex: unset !important;"><input type="checkbox" id="wind-pitch" checked> Pitch</label>
+                    <label class="rev-check" style="flex: unset !important;"><input type="checkbox" id="wind-yaw" checked> Yaw</label>
                 </div>
                 <div class="slider-group" style="margin-top: 18px; margin-bottom: 0;">
                     <label for="cfg-wind">Strength: <span id="val-wind">0.10</span></label>
@@ -218,6 +218,6 @@
         <div class="osd-instructions">Press 'Escape' to Pause | 'C' to Switch View | Toggle Arm Switch to Fly</div>
     </div>
 
-    <script type="module" src="js/main.js?v=9"></script>
+    <script type="module" src="js/main.js?v=10"></script>
 </body>
 </html>

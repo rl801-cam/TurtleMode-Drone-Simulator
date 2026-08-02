@@ -18,10 +18,10 @@ export class PhysicsEngine {
             restitution: 0.2, // How much energy a frame/prop strike gives back
             friction: 0.2, // Coulomb friction coefficient at contact points
             wind: {
-                // Gentle random torque per body axis, off until the pilot opts in
-                roll: false,
-                pitch: false,
-                yaw: false,
+                // Gentle random torque per body axis, on by default on all three
+                roll: true,
+                pitch: true,
+                yaw: true,
                 strength: 0.1 // 0..1, scaled by windMaxTorque below
             },
             rates: {
