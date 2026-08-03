@@ -67,7 +67,7 @@ export class AudioEngine {
 
         // Wind noise. Full airflow roar arrives around racing speed; the curve is steeper than
         // linear because air noise climbs sharply rather than fading in evenly.
-        this.maxAirGain = 0.14;
+        this.maxAirGain = 0.08;
         this.airReferenceSpeed = 30; // m/s (~108 km/h) for full-scale wind noise
         this.airCurve = 1.5;
 
