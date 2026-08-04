@@ -68,8 +68,9 @@ export const TRACKS = {
             { name: 'THE SHAFT',       x: -57.76, y: 5.00, z: -46.90, yaw:    0, pitch:  90, radius: 2.0 },
             // Out of the second storey through the matching hole in the upper wall, 7.8 m up.
             { name: 'UPPER WALL HOLE', x: -37.11, y: 7.82, z: -46.91, yaw:   90, radius: 0.8 },
-            // Back down through the deck the same way, this time nose first
-            { name: 'DECK DIVE',       x:   0.00, y: 5.00, z: -46.40, yaw:    0, pitch: -90, radius: 2.4 },
+            // Back down through the deck the same way, this time nose first. The opening is a
+            // round one a shade over 10 m across, so the ring still leaves 1.7 m all round.
+            { name: 'DECK DIVE',       x:   0.00, y: 5.00, z: -46.40, yaw:    0, pitch: -90, radius: 3.2 },
             { name: 'RUN-OUT',         x:  -6.00, y: 2.60, z: -24.00, yaw:  195 },
 
             // --- under the solar array: a 1.6 m ceiling and a foundation post every 4.5 m ---
