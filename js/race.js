@@ -14,6 +14,10 @@ const GATE_COLORS = {
 const MAX_STORED = 25;
 const LEADERBOARD_SHOWN = 10;
 
+// A torus is built with its hole along +Z, so a gate is oriented by rotating this onto the
+// direction of travel. Shared and never mutated.
+const TORUS_AXIS = new THREE.Vector3(0, 0, 1);
+
 export class Leaderboard {
     constructor(trackId) {
         this.key = `turtlemode.leaderboard.${trackId}`;
@@ -121,24 +125,36 @@ export class RaceManager {
         this.track = track;
         this.leaderboard = new Leaderboard(track.id);
 
-        const radius = track.gateRadius;
         track.gates.forEach((g, i) => {
+            // Gates squeezed into a hole in the map carry their own radius; the rest take the
+            // track default.
+            const radius = Number.isFinite(g.radius) ? g.radius : track.gateRadius;
             const yaw = THREE.MathUtils.degToRad(g.yaw);
+            // `pitch` tilts the direction of travel out of the horizontal, so a gate can lie flat
+            // in a hatch and be taken on the way up or down. Absent on ordinary gates.
+            const pitch = THREE.MathUtils.degToRad(g.pitch || 0);
             const position = new THREE.Vector3(g.x, g.y, g.z);
-            const normal = new THREE.Vector3(Math.sin(yaw), 0, -Math.cos(yaw));
+            const normal = new THREE.Vector3(
+                Math.sin(yaw) * Math.cos(pitch),
+                Math.sin(pitch),
+                -Math.cos(yaw) * Math.cos(pitch)
+            );
 
             const mesh = new THREE.Mesh(
                 new THREE.TorusGeometry(radius, 0.12, 8, 40),
                 new THREE.MeshBasicMaterial({ color: GATE_COLORS.upcoming, fog: false })
             );
             mesh.position.copy(position);
-            // A torus is built with its hole along +Z, so turning it by (180 - yaw) about Y
-            // lines the hole up with the gate normal.
-            mesh.rotation.set(0, Math.PI - yaw, 0);
+            // Roll about the normal is free - a torus looks the same either way - so lining the
+            // hole up with the normal is the whole of the orientation.
+            mesh.quaternion.setFromUnitVectors(TORUS_AXIS, normal);
             this.group.add(mesh);
 
             const label = this.createLabel(i === 0 ? 'S/F' : String(i + 1));
-            label.position.set(position.x, position.y + radius + 0.9, position.z);
+            // Clear the top of the ring by its actual vertical extent, which collapses to nothing
+            // once the gate is lying flat.
+            const halfHeight = radius * Math.sqrt(Math.max(0, 1 - normal.y * normal.y));
+            label.position.set(position.x, position.y + halfHeight + 0.9, position.z);
             this.group.add(label);
 
             this.gates.push({ name: g.name, position, normal, radius, mesh, label, index: i });
