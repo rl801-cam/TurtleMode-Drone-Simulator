@@ -450,3 +450,267 @@ button {
     from { opacity: 1; }
     to { opacity: 0.3; }
 }
+
+/* ---------------------------------------------------------------- */
+/* Game mode: Practice vs Race                                       */
+/* ---------------------------------------------------------------- */
+
+/* Sections carry both classes and the body toggles which one is live, so a section only
+   ever has to declare which mode it belongs to. */
+.race-only { display: none; }
+body.mode-race .race-only { display: block; }
+body.mode-race .practice-only { display: none; }
+
+.mode-switch {
+    display: flex;
+    gap: 8px;
+    padding: 5px;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    flex-shrink: 0;
+}
+
+.mode-btn {
+    flex: 1;
+    padding: 10px 0;
+    background: transparent;
+    color: var(--text-muted);
+    border-radius: 7px;
+    font-size: 0.9rem;
+}
+
+.mode-btn:hover {
+    color: var(--text-main);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.mode-btn.active {
+    background: var(--accent-color);
+    color: #000;
+    box-shadow: 0 0 14px var(--accent-glow);
+}
+
+.mode-blurb {
+    margin: -10px 0 0;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.btn-small {
+    padding: 7px 14px;
+    font-size: 0.75rem;
+}
+
+/* Race setup */
+#race-track,
+#pilot-name {
+    width: 100%;
+    padding: 7px;
+    background: rgba(0, 0, 0, 0.3);
+    color: var(--text-main);
+    border: 1px solid var(--panel-border);
+    border-radius: 4px;
+    font-family: var(--font-ui);
+    font-size: 0.9rem;
+}
+
+#pilot-name {
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+#race-track:focus,
+#pilot-name:focus {
+    outline: none;
+    border-color: var(--accent-color);
+    box-shadow: 0 0 5px var(--accent-glow);
+}
+
+.spec-sheet {
+    margin-top: 5px;
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+}
+
+.spec-sheet h3 {
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+}
+
+.spec-grid {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 6px 15px;
+    font-size: 0.82rem;
+}
+
+.spec-grid span { color: var(--text-muted); }
+
+.spec-grid strong {
+    color: var(--accent-color);
+    font-family: var(--font-osd);
+    font-weight: 700;
+}
+
+.race-status-grid { font-size: 0.9rem; }
+
+/* Leaderboard */
+.board-row {
+    display: grid;
+    grid-template-columns: 34px 1fr auto;
+    gap: 10px;
+    align-items: baseline;
+    padding: 7px 8px;
+    border-radius: 6px;
+    font-size: 0.88rem;
+}
+
+.board-row + .board-row { margin-top: 3px; }
+
+.board-row:nth-child(odd) { background: rgba(255, 255, 255, 0.035); }
+
+.board-row .rank {
+    font-family: var(--font-osd);
+    color: var(--text-muted);
+    text-align: right;
+}
+
+.board-row .pilot {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.board-row .time {
+    font-family: var(--font-osd);
+    font-weight: 700;
+    color: var(--accent-color);
+}
+
+.board-row.podium .rank { color: var(--accent-color); }
+.board-row.leader .time { text-shadow: 0 0 8px var(--accent-glow); }
+
+/* The row the pilot just put up */
+.board-row.you {
+    background: rgba(0, 255, 204, 0.12);
+    box-shadow: inset 0 0 0 1px var(--accent-glow);
+}
+
+.board-empty {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    text-align: center;
+    padding: 14px 0;
+}
+
+/* ---------------------------------------------------------------- */
+/* Race HUD                                                          */
+/* ---------------------------------------------------------------- */
+
+#race-hud.hidden { display: none; }
+
+#race-timer {
+    position: absolute;
+    top: 15px;
+    right: 20px;
+    font-size: 2.6rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: var(--accent-color);
+    text-shadow: 0 0 12px var(--accent-glow), 1px 1px 3px rgba(0, 0, 0, 0.9);
+    font-variant-numeric: tabular-nums;
+}
+
+#race-sub {
+    position: absolute;
+    top: 68px;
+    right: 20px;
+    font-size: 0.85rem;
+    letter-spacing: 1px;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+#race-gate {
+    position: absolute;
+    bottom: 78px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 1.1rem;
+    letter-spacing: 2px;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+#race-laps {
+    position: absolute;
+    top: 100px;
+    right: 20px;
+    text-align: right;
+    font-size: 0.85rem;
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+#race-laps .lap-best { color: var(--accent-color); }
+
+/* Chevron that swings round to point at the next gate whenever it is off to one side or
+   behind you. It sits on the crosshair and rotates about it, so the direction it points is
+   the direction you need to turn. */
+#race-pointer {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+#race-pointer.visible { opacity: 0.9; }
+
+#race-pointer span {
+    position: absolute;
+    top: -95px;
+    left: -14px;
+    display: block;
+    width: 28px;
+    font-size: 1.8rem;
+    line-height: 1;
+    text-align: center;
+    color: var(--accent-color);
+    text-shadow: 0 0 10px var(--accent-glow);
+    /* The glyph points right by default; -90deg makes it point up, which is where the
+       rotation applied to the parent measures from. */
+    transform: rotate(-90deg);
+}
+
+#race-toast {
+    position: absolute;
+    top: 28%;
+    left: 50%;
+    transform: translateX(-50%);
+    text-align: center;
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: 3px;
+    color: var(--text-main);
+    text-shadow: 0 0 16px rgba(0, 0, 0, 0.9);
+    opacity: 0;
+    pointer-events: none;
+}
+
+#race-toast.show { animation: toast-flash 2.4s ease-out forwards; }
+#race-toast.record { color: var(--accent-color); text-shadow: 0 0 22px var(--accent-glow); }
+
+@keyframes toast-flash {
+    0% { opacity: 0; transform: translateX(-50%) scale(0.85); }
+    12% { opacity: 1; transform: translateX(-50%) scale(1); }
+    75% { opacity: 1; }
+    100% { opacity: 0; }
+}

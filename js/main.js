@@ -3,17 +3,19 @@
 // The ?v= tags are cache busters, matching the one on style.css. Browsers cache ES modules
 // aggressively, so without them an edited module can keep running from cache against fresh
 // HTML. Bump every one of these (and the two in index.html) together after changing any file.
-import { Renderer } from './renderer.js?v=20';
-import { PhysicsEngine } from './physics.js?v=20';
-import { InputHandler } from './input.js?v=20';
-import { UIHandler } from './ui.js?v=20';
-import { AudioEngine } from './audio.js?v=20';
-import { VideoDelay } from './latency.js?v=20';
+import { Renderer } from './renderer.js?v=21';
+import { PhysicsEngine } from './physics.js?v=21';
+import { InputHandler } from './input.js?v=21';
+import { UIHandler } from './ui.js?v=21';
+import { AudioEngine } from './audio.js?v=21';
+import { VideoDelay } from './latency.js?v=21';
+import { RaceManager } from './race.js?v=21';
+import { RACE_SPEC, formatTime } from './tracks.js?v=21';
 
 // Shown in the launch menu and logged on boot. index.html itself carries no cache buster, so a
 // browser holding a stale copy of it will keep loading the old ?v= modules and none of the tags
 // above will help. If this does not match the newest version, the page needs a hard reload.
-const BUILD = 'v20';
+const BUILD = 'v21';
 
 class Simulator {
     constructor() {
@@ -22,7 +24,9 @@ class Simulator {
         this.input = new InputHandler();
         this.audio = new AudioEngine();
         this.videoDelay = new VideoDelay();
-        
+        this.race = new RaceManager(this.renderer);
+        this.mode = 'practice'; // 'practice' | 'race'
+
         // Register collision check callback to evaluate inside the physics sub-step.
         // The physics engine drives the radius - it queries several contact spheres per sub-step.
         this.physics.collisionCallback = (pos, radius) => this.renderer.checkCollision(pos, radius);
@@ -34,7 +38,8 @@ class Simulator {
             this.physics,
             this.input,
             this.renderer,
-            (mapChoice) => this.start(mapChoice),
+            this.race,
+            (mapChoice, mode, track) => this.start(mapChoice, mode, track),
             () => this.resume(),
             () => this.reset(),
             () => this.exit()
@@ -122,16 +127,44 @@ class Simulator {
         this.animate();
     }
 
-    async start(mapChoice) {
+    async start(mapChoice, mode = 'practice', track = null) {
         // Runs synchronously inside the Start button's click handler, which is the user gesture
         // the browser requires before it will let an AudioContext produce sound.
         this.audio.start();
 
+        this.mode = mode === 'race' && track ? 'race' : 'practice';
+
+        if (this.mode === 'race') {
+            // The spec overwrites whatever the practice sliders were left on. Nothing in the
+            // race UI can move these, so every lap on the board was flown on the same drone.
+            this.physics.updateConfig(RACE_SPEC);
+            this.videoDelay.setLatency(RACE_SPEC.latencyMs / 1000);
+            this.physics.setSpawn(track.spawn.x, track.spawn.y, track.spawn.z, track.spawn.yaw);
+            this.renderer.setSpawnPoint(track.spawn.x, track.spawn.y, track.spawn.z);
+        } else {
+            // Racing clobbered the config, so put the pilot's own numbers back
+            this.ui.applyPracticeConfig();
+            const latencyMs = parseInt(document.getElementById('cfg-latency').value, 10) || 0;
+            this.videoDelay.setLatency(latencyMs / 1000);
+            this.physics.setSpawn(0, 1, 0, 0);
+            this.renderer.setSpawnPoint(0, 1, 0);
+        }
+
+        this.physics.reset();
         this.state = 'PLAYING';
         this.lastTime = performance.now();
         this.videoDelay.clear();
         this.renderer.resetCamera();
         await this.renderer.loadMap(mapChoice);
+
+        if (this.mode === 'race') {
+            this.race.setTrack(track);
+            this.race.setVisible(true);
+            this.ui.renderLeaderboard();
+        } else {
+            this.race.clearTrack();
+            this.race.setVisible(false);
+        }
     }
 
     pause() {
@@ -150,17 +183,54 @@ class Simulator {
         this.physics.reset();
         // Drop the buffered feed, or the view would replay the old flight after the teleport
         this.videoDelay.clear();
+        // A lap flown partly before a teleport back to the grid is not a lap, so the run
+        // starts over from the start gate.
+        if (this.mode === 'race') this.race.resetRun();
         this.state = 'PLAYING';
         this.lastTime = performance.now();
         this.renderer.resetCamera();
     }
 
     exit() {
+        this.race.clearTrack();
+        this.mode = 'practice';
+        // Put the drone back at the origin so the menu's orbiting camera has it in frame
+        this.physics.setSpawn(0, 1, 0, 0);
+        this.renderer.setSpawnPoint(0, 1, 0);
         this.physics.reset();
         this.audio.silence();
         this.state = 'MENU';
         // Reset camera lookat for menu
         this.renderer.camera.lookAt(0, 0, 0);
+    }
+
+    updateRace(dt, now) {
+        const position = this.physics.droneBody.position;
+        this.race.update(position, dt);
+        this.race.animate(now);
+
+        for (const event of this.race.consumeEvents()) {
+            if (event.type === 'start') {
+                this.ui.showRaceToast('GO', false);
+            } else if (event.type === 'lap') {
+                const time = formatTime(event.ms);
+                if (event.record) {
+                    this.ui.showRaceToast(`NEW RECORD — ${time}`, true);
+                } else if (event.personalBest) {
+                    this.ui.showRaceToast(`SESSION BEST — ${time}`, true);
+                } else {
+                    const place = event.rank ? ` — P${event.rank}` : '';
+                    this.ui.showRaceToast(`LAP ${event.lap} — ${time}${place}`, false);
+                }
+                // Keeps the pause menu and launch menu boards current without polling
+                this.ui.renderLeaderboard();
+            }
+        }
+
+        this.ui.updateRaceHud(
+            this.race.distanceToNextGate(position),
+            this.race.pointerAngle(this.renderer.camera)
+        );
     }
 
     animate() {
@@ -202,7 +272,12 @@ class Simulator {
 
             // 4. Step Physics Engine (sub-steps inside this method will fire the 'postStep' listener and handle collisions)
             // Cap dt to prevent huge jumps if tab was inactive
-            this.physics.step(Math.min(dt, 0.1));
+            const stepDt = Math.min(dt, 0.1);
+            this.physics.step(stepDt);
+
+            // 4b. Gate crossings and lap timing, off the live physics position rather than the
+            // delayed video feed - the clock times the drone, not the picture.
+            if (this.mode === 'race') this.updateRace(stepDt, now);
 
             // 5. Sync Renderer with Physics, through the video link.
             // In FPV the camera rides the airframe, so showing a past pose is exactly what a
@@ -248,5 +323,7 @@ window.addEventListener('load', () => {
     console.log(`TurtleMode Simulator - build ${BUILD}`);
     const stamp = document.getElementById('build-stamp');
     if (stamp) stamp.textContent = `build ${BUILD}`;
-    new Simulator();
+    // Exposed so the running sim can be poked at from the console - handy when checking a
+    // gate placement or a physics tweak without rebuilding anything.
+    window.simulator = new Simulator();
 });

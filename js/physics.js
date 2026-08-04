@@ -31,13 +31,20 @@ export class PhysicsEngine {
             }
         };
 
+        // Where reset() puts the drone. Practice starts at the map origin; a race moves this to
+        // the start grid so the airframe faces down the run to the first gate.
+        this.spawn = {
+            position: new CANNON.Vec3(0, 1, 0),
+            quaternion: new CANNON.Quaternion(0, 0, 0, 1)
+        };
+
         // Create the drone body (Simplified Cuboid)
         const size = new CANNON.Vec3(0.15, 0.05, 0.15); // W, H, D
         this.droneShape = new CANNON.Box(size);
         this.droneBody = new CANNON.Body({
             mass: this.params.mass,
             shape: this.droneShape,
-            position: new CANNON.Vec3(0, 1, 0), // Start slightly above ground
+            position: this.spawn.position.clone(), // Start slightly above ground
             linearDamping: this.params.drag,
             angularDamping: this.params.drag
         });
@@ -458,10 +465,20 @@ export class PhysicsEngine {
         }
     }
 
+    // yawDegrees follows the same convention as the gates: 0 faces -Z, the way the airframe
+    // points with an identity quaternion.
+    setSpawn(x, y, z, yawDegrees = 0) {
+        this.spawn.position.set(x, y, z);
+        this.spawn.quaternion.setFromAxisAngle(
+            new CANNON.Vec3(0, 1, 0),
+            -yawDegrees * Math.PI / 180
+        );
+    }
+
     reset() {
         // Reset position and velocity
-        this.droneBody.position.set(0, 1, 0);
-        this.droneBody.quaternion.set(0, 0, 0, 1);
+        this.droneBody.position.copy(this.spawn.position);
+        this.droneBody.quaternion.copy(this.spawn.quaternion);
         this.droneBody.velocity.set(0, 0, 0);
         this.droneBody.angularVelocity.set(0, 0, 0);
         // Re-seed the sweep origin, or the next sub-step would sweep from the pre-reset position

@@ -1,14 +1,24 @@
 // ui.js - Handles DOM interactions and Menus
 
+import { TRACKS, DEFAULT_TRACK, formatTime } from './tracks.js?v=21';
+
 export class UIHandler {
-    constructor(physicsEngine, inputHandler, renderer, startCallback, resumeCallback, resetCallback, exitCallback) {
+    constructor(physicsEngine, inputHandler, renderer, race, startCallback, resumeCallback, resetCallback, exitCallback) {
         this.physics = physicsEngine;
         this.inputHandler = inputHandler;
         this.renderer = renderer;
+        this.race = race;
         this.startCallback = startCallback;
         this.resumeCallback = resumeCallback;
         this.resetCallback = resetCallback;
         this.exitCallback = exitCallback;
+
+        // 'practice' is the original free-flight mode; 'race' locks the airframe to a spec and
+        // times laps round a gated course.
+        this.mode = localStorage.getItem('gameMode') === 'race' ? 'race' : 'practice';
+        this.trackId = localStorage.getItem('trackId') && TRACKS[localStorage.getItem('trackId')]
+            ? localStorage.getItem('trackId')
+            : DEFAULT_TRACK;
         this.speedReadoutEnabled = localStorage.getItem('speedReadoutEnabled') === 'true';
         this.cameraMode = localStorage.getItem('cameraMode') === 'los' ? 'los' : 'fpv';
         this.losFov = parseFloat(localStorage.getItem('losFov')) || 50;
@@ -52,12 +62,168 @@ export class UIHandler {
             losFovSlider: document.getElementById('cfg-los-fov'),
             losFovValue: document.getElementById('val-los-fov'),
             uptiltSlider: document.getElementById('cfg-uptilt'),
-            uptiltValue: document.getElementById('val-uptilt')
+            uptiltValue: document.getElementById('val-uptilt'),
+
+            osdInstructions: document.getElementById('osd-instructions'),
+
+            modeSwitch: document.getElementById('mode-switch'),
+            modeBlurb: document.getElementById('mode-blurb'),
+            trackSelect: document.getElementById('race-track'),
+            trackDesc: document.getElementById('race-track-desc'),
+            pilotName: document.getElementById('pilot-name'),
+            leaderboardBody: document.getElementById('leaderboard-body'),
+            btnClearBoard: document.getElementById('btn-clear-board'),
+
+            pauseTrack: document.getElementById('pause-track'),
+            pauseLaps: document.getElementById('pause-laps'),
+            pauseBest: document.getElementById('pause-best'),
+            pauseRecord: document.getElementById('pause-record'),
+            pauseLeaderboard: document.getElementById('pause-leaderboard'),
+
+            raceHud: document.getElementById('race-hud'),
+            raceTimer: document.getElementById('race-timer'),
+            raceSub: document.getElementById('race-sub'),
+            raceGate: document.getElementById('race-gate'),
+            racePointer: document.getElementById('race-pointer'),
+            raceToast: document.getElementById('race-toast'),
+            raceLaps: document.getElementById('race-laps')
         };
 
         this.initEventListeners();
         this.bindSliders();
         this.initCameraMode();
+        this.initRaceControls();
+        this.applyMode(this.mode);
+    }
+
+    get isRacing() {
+        return this.mode === 'race';
+    }
+
+    get currentTrack() {
+        return TRACKS[this.trackId] || TRACKS[DEFAULT_TRACK];
+    }
+
+    // --- Game mode ---------------------------------------------------------
+
+    initRaceControls() {
+        const { trackSelect, pilotName, btnClearBoard, modeSwitch } = this.elements;
+
+        if (modeSwitch) {
+            modeSwitch.querySelectorAll('.mode-btn').forEach((btn) => {
+                btn.addEventListener('click', () => this.applyMode(btn.dataset.mode));
+            });
+        }
+
+        if (trackSelect) {
+            for (const track of Object.values(TRACKS)) {
+                const option = document.createElement('option');
+                option.value = track.id;
+                option.textContent = track.name;
+                trackSelect.appendChild(option);
+            }
+            trackSelect.value = this.trackId;
+            trackSelect.addEventListener('change', (e) => {
+                this.trackId = e.target.value;
+                localStorage.setItem('trackId', this.trackId);
+                this.describeTrack();
+                this.renderLeaderboard();
+            });
+        }
+
+        if (pilotName) {
+            pilotName.value = this.race.pilotName;
+            pilotName.addEventListener('input', (e) => this.race.setPilotName(e.target.value));
+            // Whatever is in the box when focus leaves is what the leaderboard will record,
+            // so show the cleaned-up version rather than leaving the raw text sitting there.
+            pilotName.addEventListener('blur', () => { pilotName.value = this.race.pilotName; });
+        }
+
+        if (btnClearBoard) {
+            btnClearBoard.addEventListener('click', () => {
+                const track = this.currentTrack;
+                if (!confirm(`Delete every recorded time for ${track.name}? This cannot be undone.`)) return;
+                this.race.leaderboardFor(this.trackId).clear();
+                this.renderLeaderboard();
+            });
+        }
+
+        this.describeTrack();
+    }
+
+    applyMode(mode) {
+        this.mode = mode === 'race' ? 'race' : 'practice';
+        localStorage.setItem('gameMode', this.mode);
+
+        document.body.classList.toggle('mode-race', this.isRacing);
+        if (this.elements.modeSwitch) {
+            this.elements.modeSwitch.querySelectorAll('.mode-btn').forEach((btn) => {
+                btn.classList.toggle('active', btn.dataset.mode === this.mode);
+            });
+        }
+        if (this.elements.modeBlurb) {
+            this.elements.modeBlurb.textContent = this.isRacing
+                ? 'Timed laps on a fixed spec. Fly the gates in order; every lap goes on the board.'
+                : 'Free flight. Every setting is yours to change.';
+        }
+        if (this.elements.btnStart) {
+            this.elements.btnStart.textContent = this.isRacing ? 'Start Race' : 'Start Simulation';
+        }
+        if (this.elements.osdInstructions) {
+            this.elements.osdInstructions.textContent = this.isRacing
+                ? "'Escape' Pause | 'C' View | 'R' Back to Grid | ↑↓ Uptilt"
+                : "Press 'Escape' to Pause | 'C' to Switch View | ↑↓ Camera Uptilt | Toggle Arm Switch to Fly";
+        }
+        // Both menus reset to the same place; in a race that also throws the lap away, so the
+        // button should say what it actually does.
+        if (this.elements.btnReset) {
+            this.elements.btnReset.textContent = this.isRacing ? 'Back to Grid' : 'Reset Drone';
+        }
+        if (this.elements.raceHud) {
+            this.elements.raceHud.classList.toggle('hidden', !this.isRacing);
+        }
+
+        this.renderLeaderboard();
+    }
+
+    describeTrack() {
+        const track = this.currentTrack;
+        if (this.elements.trackDesc) {
+            this.elements.trackDesc.textContent =
+                `${track.description} ${track.gates.length} gates, about ${track.lapLength} m a lap.`;
+        }
+    }
+
+    // --- Leaderboard -------------------------------------------------------
+
+    // `highlightMs` marks the row the pilot just put up, so they can find themselves on a
+    // board that may have scrolled past them
+    renderLeaderboard(highlightMs) {
+        const board = this.race.leaderboardFor(this.trackId);
+        const entries = board.top();
+        const html = entries.length
+            ? entries.map((entry, i) => {
+                const classes = ['board-row'];
+                if (i < 3) classes.push('podium');
+                if (i === 0) classes.push('leader');
+                if (highlightMs !== undefined && entry.ms === highlightMs) classes.push('you');
+                return `<div class="${classes.join(' ')}">` +
+                    `<span class="rank">${i + 1}</span>` +
+                    `<span class="pilot">${this.escape(entry.name)}</span>` +
+                    `<span class="time">${formatTime(entry.ms)}</span>` +
+                    `</div>`;
+            }).join('')
+            : '<div class="board-empty">No times yet. Fly a clean lap and put one up.</div>';
+
+        if (this.elements.leaderboardBody) this.elements.leaderboardBody.innerHTML = html;
+        if (this.elements.pauseLeaderboard) this.elements.pauseLeaderboard.innerHTML = html;
+    }
+
+    // Pilot names come from a free-text box and get written straight into innerHTML
+    escape(text) {
+        return String(text).replace(/[&<>"']/g, (c) => (
+            { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+        ));
     }
 
     initCameraMode() {
@@ -130,14 +296,17 @@ export class UIHandler {
 
     initEventListeners() {
         this.elements.btnStart.addEventListener('click', async () => {
-            const mapChoice = document.getElementById('map-choice').value;
+            // A race always runs on its track's own map - the gates were placed against that
+            // geometry and mean nothing anywhere else.
+            const track = this.isRacing ? this.currentTrack : null;
+            const mapChoice = track ? track.map : document.getElementById('map-choice').value;
             const originalText = this.elements.btnStart.textContent;
             this.elements.btnStart.textContent = "Loading Map...";
             this.elements.btnStart.disabled = true;
-            
+
             try {
-                await this.startCallback(mapChoice);
-                
+                await this.startCallback(mapChoice, this.mode, track);
+
                 this.hideMenu(this.elements.launchMenu);
                 this.elements.osd.classList.remove('hidden');
             } catch (err) {
@@ -396,10 +565,98 @@ export class UIHandler {
         syncMappingFromDOM();
     }
 
+    // Pushes every practice control's current value into the physics engine. Racing overwrites
+    // the whole config with a fixed spec, so returning to practice has to put the pilot's own
+    // numbers back rather than leaving them stranded on the sliders.
+    applyPracticeConfig() {
+        const num = (id) => parseFloat(document.getElementById(id).value);
+        const checked = (id) => document.getElementById(id).checked;
+
+        this.physics.updateConfig({
+            mass: num('cfg-mass'),
+            thrust: num('cfg-thrust'),
+            drag: num('cfg-drag'),
+            restitution: num('cfg-restitution'),
+            friction: num('cfg-friction'),
+            wind: {
+                strength: num('cfg-wind'),
+                roll: checked('wind-roll'),
+                pitch: checked('wind-pitch'),
+                yaw: checked('wind-yaw')
+            },
+            rates: {
+                roll: { center: num('tune-r-c'), max: num('tune-r-m'), expo: num('tune-r-e') },
+                pitch: { center: num('tune-p-c'), max: num('tune-p-m'), expo: num('tune-p-e') },
+                yaw: { center: num('tune-y-c'), max: num('tune-y-m'), expo: num('tune-y-e') }
+            }
+        });
+    }
+
     showPauseMenu() {
         this.elements.osd.classList.add('hidden');
         this.elements.pauseMenu.classList.remove('hidden');
         this.elements.pauseMenu.classList.add('active');
+        if (this.isRacing) this.updatePauseRace();
+    }
+
+    updatePauseRace() {
+        const status = this.race.status();
+        const track = this.currentTrack;
+        if (this.elements.pauseTrack) this.elements.pauseTrack.textContent = track.name;
+        if (this.elements.pauseLaps) this.elements.pauseLaps.textContent = String(status.lap - 1);
+        if (this.elements.pauseBest) this.elements.pauseBest.textContent = formatTime(status.bestMs);
+        if (this.elements.pauseRecord) this.elements.pauseRecord.textContent = formatTime(status.recordMs);
+        this.renderLeaderboard(status.bestMs ?? undefined);
+    }
+
+    // --- Race HUD ----------------------------------------------------------
+
+    updateRaceHud(distance, pointerAngle) {
+        const status = this.race.status();
+        const { raceTimer, raceSub, raceGate, racePointer, raceLaps } = this.elements;
+
+        if (raceTimer) raceTimer.textContent = formatTime(status.currentMs);
+
+        if (raceSub) {
+            raceSub.textContent = status.state === 'ARMED'
+                ? 'ARMED — cross the start gate to begin'
+                : `LAP ${status.lap}`;
+        }
+
+        if (raceGate) {
+            const gate = this.race.gates[this.race.nextGate];
+            const label = gate ? gate.name : '';
+            raceGate.textContent =
+                `GATE ${status.nextGate}/${status.gateCount} · ${label} · ${distance.toFixed(0)} m`;
+        }
+
+        if (raceLaps) {
+            const lines = [];
+            if (status.lastMs !== null) lines.push(`LAST ${formatTime(status.lastMs)}`);
+            if (status.bestMs !== null) lines.push(`<span class="lap-best">BEST ${formatTime(status.bestMs)}</span>`);
+            if (status.recordMs !== null) lines.push(`REC&nbsp; ${formatTime(status.recordMs)}`);
+            raceLaps.innerHTML = lines.join('<br>');
+        }
+
+        if (racePointer) {
+            if (pointerAngle === null) {
+                racePointer.classList.remove('visible');
+            } else {
+                racePointer.classList.add('visible');
+                racePointer.style.transform = `rotate(${pointerAngle}rad)`;
+            }
+        }
+    }
+
+    showRaceToast(text, isRecord) {
+        const toast = this.elements.raceToast;
+        if (!toast) return;
+        toast.textContent = text;
+        toast.classList.toggle('record', !!isRecord);
+        // Restarting a CSS animation needs the class off and a reflow forced in between
+        toast.classList.remove('show');
+        void toast.offsetWidth;
+        toast.classList.add('show');
     }
 
     hideMenu(menuElement) {

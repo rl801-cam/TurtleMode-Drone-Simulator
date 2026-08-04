@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TurtleMode Simulator</title>
-    <link rel="stylesheet" href="css/style.css?v=20">
+    <link rel="stylesheet" href="css/style.css?v=21">
     <!-- Import maps for ES modules to load Three.js and Cannon-es cleanly -->
     <script type="importmap">
         {
@@ -25,7 +25,45 @@
     <!-- UI Overlay: Launch Menu -->
     <div id="launch-menu" class="ui-overlay glass-panel active">
         <h1>TurtleMode Simulator</h1>
+        <div class="mode-switch" id="mode-switch">
+            <button type="button" class="mode-btn active" data-mode="practice">Practice</button>
+            <button type="button" class="mode-btn" data-mode="race">Race</button>
+        </div>
+        <p class="small-text mode-blurb" id="mode-blurb">Free flight. Every setting is yours to change.</p>
         <div class="menu-content">
+            <div class="section race-only" id="sec-race-setup">
+                <h2>Race Setup</h2>
+                <div class="slider-group">
+                    <label for="race-track">Track:</label>
+                    <select id="race-track"></select>
+                </div>
+                <p class="small-text" style="text-align: left;" id="race-track-desc"></p>
+                <div class="slider-group">
+                    <label for="pilot-name">Pilot Name:</label>
+                    <input type="text" id="pilot-name" maxlength="16" placeholder="PILOT" autocomplete="off">
+                </div>
+                <div class="spec-sheet">
+                    <h3>Spec Class &mdash; Fixed</h3>
+                    <div class="spec-grid">
+                        <span>Mass</span><strong>0.5 kg</strong>
+                        <span>Max Thrust</span><strong>25 N</strong>
+                        <span>Air Drag</span><strong>0.50</strong>
+                        <span>Restitution</span><strong>0.20</strong>
+                        <span>Surface Grip</span><strong>0.20</strong>
+                        <span>Wind</span><strong>Calm</strong>
+                        <span>Video Latency</span><strong>0 ms</strong>
+                        <span>Rates</span><strong>200 / 600 / 0.50</strong>
+                    </div>
+                    <p class="small-text" style="text-align: left; margin: 10px 0 0;">Every pilot races the same airframe in the same air, so the times on the board mean something. Camera, controller mapping and display settings are still yours.</p>
+                </div>
+            </div>
+
+            <div class="section race-only" id="sec-leaderboard">
+                <h2>Leaderboard</h2>
+                <div id="leaderboard-body"></div>
+                <button type="button" id="btn-clear-board" class="btn-secondary btn-small" style="margin-top: 12px;">Clear Leaderboard</button>
+            </div>
+
             <div class="section input-check">
                 <h2>Controller Status</h2>
                 <div id="gamepad-status" class="status-indicator disconnected">No Gamepad Detected</div>
@@ -53,7 +91,7 @@
                 </div>
             </div>
 
-            <div class="section map-select">
+            <div class="section map-select practice-only">
                 <h2>Map Selection</h2>
                 <div class="slider-group">
                     <label for="map-choice">Map:</label>
@@ -83,11 +121,13 @@
                         <input type="range" id="cfg-uptilt" min="0" max="60" step="1" value="10">
                     </div>
                     <p class="small-text" style="text-align: left;">How far the onboard camera points above level. Adjust in flight with <strong>&uarr;</strong> and <strong>&darr;</strong>. More uptilt suits faster flying, since the airframe leans further forward to get there.</p>
-                    <div class="slider-group">
-                        <label for="cfg-latency">Video Latency: <span id="val-latency">0</span> ms</label>
-                        <input type="range" id="cfg-latency" min="0" max="200" step="5" value="0">
+                    <div class="practice-only" id="latency-options">
+                        <div class="slider-group">
+                            <label for="cfg-latency">Video Latency: <span id="val-latency">0</span> ms</label>
+                            <input type="range" id="cfg-latency" min="0" max="200" step="5" value="0">
+                        </div>
+                        <p class="small-text" style="text-align: left; margin-bottom: 0;">How far the picture trails the drone. Analog runs about 20&ndash;30 ms glass to glass, digital 30&ndash;40; past 100 ms is a failing link. Only the view lags &ndash; the sticks and the physics stay live, so you hit things that were already there.</p>
                     </div>
-                    <p class="small-text" style="text-align: left; margin-bottom: 0;">How far the picture trails the drone. Analog runs about 20&ndash;30 ms glass to glass, digital 30&ndash;40; past 100 ms is a failing link. Only the view lags &ndash; the sticks and the physics stay live, so you hit things that were already there.</p>
                 </div>
                 <div id="los-options" style="display: none;">
                     <div class="slider-group">
@@ -98,7 +138,7 @@
                 </div>
             </div>
 
-            <div class="section config">
+            <div class="section config practice-only">
                 <h2>Drone Config</h2>
                 <div class="slider-group">
                     <label for="cfg-mass">Mass: <span id="val-mass">0.5</span> kg</label>
@@ -122,7 +162,7 @@
                 </div>
             </div>
 
-            <div class="section wind">
+            <div class="section wind practice-only">
                 <h2>Wind</h2>
                 <p class="small-text" style="text-align: left;">A light, slowly shifting breeze that nudges the drone on the axes you enable. Small enough to fly through, big enough to keep you working.</p>
                 <div class="map-row" style="justify-content: flex-start; gap: 25px;">
@@ -147,7 +187,18 @@
     <div id="pause-menu" class="ui-overlay glass-panel hidden">
         <h1>Paused</h1>
         <div class="menu-content">
-            <div class="section tuning">
+            <div class="section race-only" id="sec-pause-race">
+                <h2>Race Status</h2>
+                <div class="spec-grid race-status-grid">
+                    <span>Track</span><strong id="pause-track">&mdash;</strong>
+                    <span>Laps Completed</span><strong id="pause-laps">0</strong>
+                    <span>Session Best</span><strong id="pause-best">--:--.---</strong>
+                    <span>Track Record</span><strong id="pause-record">--:--.---</strong>
+                </div>
+                <div id="pause-leaderboard" style="margin-top: 15px;"></div>
+                <p class="small-text" style="text-align: left; margin: 12px 0 0;">Resetting to the grid throws away the lap in progress &ndash; a lap only counts if it was flown gate to gate in one go.</p>
+            </div>
+            <div class="section tuning practice-only">
                 <h2>Rates Tuning</h2>
                 <div class="rates-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
                     <div class="rate-col">
@@ -230,9 +281,19 @@
         <div class="osd-element" id="osd-arm">DISARMED</div>
         <div class="osd-element" id="osd-throttle">THR: 0%</div>
         <div class="osd-center-crosshair">+</div>
-        <div class="osd-instructions">Press 'Escape' to Pause | 'C' to Switch View | &uarr;&darr; Camera Uptilt | Toggle Arm Switch to Fly</div>
+        <div class="osd-instructions" id="osd-instructions">Press 'Escape' to Pause | 'C' to Switch View | &uarr;&darr; Camera Uptilt | Toggle Arm Switch to Fly</div>
+
+        <!-- Race HUD, shown only in Race mode -->
+        <div id="race-hud" class="hidden">
+            <div id="race-timer">0:00.000</div>
+            <div id="race-sub">ARMED &mdash; cross the start gate to begin</div>
+            <div id="race-gate">GATE 1/14 &middot; 0 m</div>
+            <div id="race-pointer"><span>&#10148;</span></div>
+            <div id="race-toast"></div>
+            <div id="race-laps"></div>
+        </div>
     </div>
 
-    <script type="module" src="js/main.js?v=20"></script>
+    <script type="module" src="js/main.js?v=21"></script>
 </body>
 </html>

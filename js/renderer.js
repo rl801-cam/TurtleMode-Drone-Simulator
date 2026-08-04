@@ -86,11 +86,8 @@ export class Renderer {
         this.spawnPosition = new THREE.Vector3(0, 1, 0);
         this.losEyeHeight = 5; // metres above ground
         this.losStandoff = 3; // metres behind the spawn point
-        this.losEye = new THREE.Vector3(
-            this.spawnPosition.x,
-            this.losEyeHeight,
-            this.spawnPosition.z + this.losStandoff
-        );
+        this.losEye = new THREE.Vector3();
+        this.setSpawnPoint(this.spawnPosition.x, this.spawnPosition.y, this.spawnPosition.z);
 
         this.environmentGroup = new THREE.Group();
         this.scene.add(this.environmentGroup);
@@ -210,6 +207,14 @@ export class Renderer {
             this.camera.fov = fov;
             this.camera.updateProjectionMatrix();
         }
+    }
+
+    // Keeps the Line of Sight pilot standing next to wherever the drone now spawns, so a race
+    // start grid does not leave them watching from the middle of the map.
+    setSpawnPoint(x, y, z) {
+        this.spawnPosition.set(x, y, z);
+        this.losEye.set(x, this.losEyeHeight, z + this.losStandoff);
+        if (this.cameraMode === 'los') this.resetCamera();
     }
 
     // Distance from the pilot's viewpoint to the drone, used by the LOS OSD readout
