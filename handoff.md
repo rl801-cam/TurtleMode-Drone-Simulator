@@ -9,6 +9,9 @@ TurtleMode Simulator is a web-based FPV drone simulator running entirely in the 
 on realistic flight physics, Gamepad API support for real RC transmitters, and behaviour that holds
 up across framerates.
 
+It runs in two modes. **Practice** is free flight with every parameter on a slider. **Race** locks
+the airframe to a fixed spec and times laps round a gated course, with a persistent leaderboard.
+
 ### Tech Stack
 * **Core:** Vanilla HTML, CSS, JavaScript (ES modules). No bundler, no `npm install` — dependencies
   arrive via an `<importmap>` from unpkg.
@@ -28,18 +31,27 @@ up across framerates.
 * **`js/renderer.js`** — Three.js scene, both cameras, map loading, and the BVH collision queries
   the physics engine calls into.
 * **`js/input.js`** — Gamepad API, axis mapping, deadband, reversing, arm switch.
-* **`js/ui.js`** — DOM bindings, menus, slider-to-physics wiring, custom map upload.
+* **`js/ui.js`** — DOM bindings, menus, slider-to-physics wiring, custom map upload, mode switch,
+  leaderboard rendering and the race HUD.
 * **`js/audio.js`** — synthesised motor and prop noise.
 * **`js/latency.js`** — artificial video-link delay. Pure and DOM-free, so it tests directly.
+* **`js/race.js`** — gate meshes, crossing detection, the lap clock, and the `localStorage`
+  leaderboard.
+* **`js/tracks.js`** — course data (gate positions, radii, spawn) and the fixed racing spec.
 
 ### Default configuration
 Mass `0.5 kg` · Max thrust `25 N` (~5:1 TWR, hover near 20% throttle) · Air drag `0.5` ·
 Restitution `0.2` · Surface grip `0.2` · Wind `0.1` on all three axes · Video latency `0 ms` ·
 Camera uptilt `10°` · Default map `Bando`.
 
-Defaults live in **two places that must agree**: `params` in `physics.js` and the `value=`
-attributes plus readout spans in `index.html`. There is no persistence layer, so these are what
-every session starts with.
+Defaults live in **three places that must agree**: `params` in `physics.js`, the `value=`
+attributes plus readout spans in `index.html`, and `RACE_SPEC` in `tracks.js` — which is also
+printed as a spec sheet in the launch menu, in a fourth place, by hand.
+
+### What persists
+`localStorage` holds camera mode, LOS zoom, camera uptilt, speed readout, audio, game mode,
+selected track, pilot name and the per-track leaderboards. **Rates, physics parameters and axis
+mappings do not** — they come from the HTML defaults on every load.
 
 ## How the physics actually works
 
@@ -53,6 +65,44 @@ and no `Trimesh`; map geometry is merged into a single BVH and contacts are reso
 2. Cannon integrates.
 3. `postStep` — `resolveCollisions()` runs continuous collision detection, gathers contacts,
    corrects penetration, and applies impulses.
+
+## How racing works
+
+`race.js` owns the gates, the clock and the board; `tracks.js` is data only. Starting a race loads
+the track's own map (the gates were surveyed against that geometry and mean nothing anywhere else),
+overwrites the physics config with `RACE_SPEC`, and moves both the drone's spawn and the Line of
+Sight viewpoint to the start grid.
+
+**A gate is a plane with a radius.** Every frame, `RaceManager.update()` takes the segment from last
+frame's position to this one and asks `testGate()` whether it passed through the disc. The two ends
+of the segment only have to land on *opposite* sides of the plane: **a gate counts from either
+side**, so a line that arrives at a ring the other way round is a line and not a fault. The normal
+is now purely the ring's orientation — what the disc is perpendicular to — and no longer picks a
+side, which also means a gate lying flat in a floor opening (`pitch: ±90`) counts on the way up and
+on the way down alike.
+
+**Only the gate the run is waiting on is ever armed.** That single fact is what keeps two-sided
+crossings honest: the first crossing advances `nextGate`, the ring behind you goes cold, and a drone
+bouncing about in a ring cannot machine-gun it. The order of the gates is still the whole of the
+course — it is the *direction through each ring* that has stopped mattering, not the sequence.
+
+**The clock is trimmed to the crossing, not the frame.** `testGate()` returns the fraction along the
+segment at which the plane was crossed, and both the start gate and each lap boundary subtract the
+unused remainder of that frame. Without it, times quantise to the frame interval and a 144 Hz
+machine posts systematically different laps from a 60 Hz one.
+
+**Events, not callbacks.** `update()` queues `start` / `gate` / `lap` events and `main.js` drains
+them with `consumeEvents()` each frame, turning them into HUD toasts and a leaderboard re-render.
+`race.js` therefore never touches the menus.
+
+**The leaderboard is `localStorage`**, one key per track (`turtlemode.leaderboard.<trackId>`),
+one row per pilot holding their fastest lap, 25 stored and 10 shown. It is read defensively — a
+hand-edited or half-written store is filtered rather than trusted. It is also per-browser, so
+"track record" means this browser's record.
+
+`clearTrack()` disposes the ring geometry, the ring material, and both the sprite material and its
+canvas texture. Labels are canvas textures, so dropping the group without disposing them leaks a
+texture per gate on every track change.
 
 ## Invariants — break these and the sim misbehaves in non-obvious ways
 
@@ -119,6 +169,31 @@ Each of these was found the hard way. They are load-bearing.
     period so contact flicker on uneven map geometry does not let it back in. Note the naming: the
     *wind* in `physics.js` is a disturbance torque, while `air*` in `audio.js` is the sound of
     moving through air. They are unrelated.
+14. **Gates are parented to `renderer.scene`, never to `environmentGroup`.** The collision BVH is
+    built by merging everything under `environmentGroup`, so a gate placed there becomes solid and
+    a racing line turns into a lottery. Parenting to the scene also keeps the rings clear of the
+    map teardown, which empties `environmentGroup` on every load.
+15. **The lap clock times the drone, not the picture.** `race.update()` is handed
+    `physics.droneBody.position`, never the delayed pose out of `latency.js`. Feed it the video
+    feed and a lap time starts depending on the latency slider.
+16. **A crossing counts from either side, but only inside the radius, and only on the armed gate.**
+    Two-sided detection is safe *because* just one gate is live at a time and taking it advances the
+    run past it — that is what used to be bought by the direction test, and if a future change ever
+    arms more than one gate at once (sector splits, missed-gate recovery), the machine-gunning it
+    used to prevent comes straight back and needs a cooldown or a re-arm rule of its own. The radial
+    test is untouched and non-negotiable: drop it and the entire infinite plane counts as a gate.
+17. **`RACE_SPEC` clobbers the physics config, so practice has to put it back.** A practice start
+    calls `ui.applyPracticeConfig()`, which pushes every practice control's current DOM value into
+    the engine. Skip it and a pilot who has raced once flies the spec drone while the sliders read
+    like their own settings.
+18. **Gate coordinates in `tracks.js` are survey data.** They were measured against the `bando.glb`
+    collision mesh, several sit inside openings a metre or two across, and the smallest rings
+    (`radius: 0.62`, under the solar array) have centimetres to spare. Moving a gate half a metre
+    is likely to bury it in a wall, a panel or the first-floor slab. Re-measure before editing.
+19. **One yaw convention, shared by gates and spawn.** 0° faces −Z (the way the airframe points
+    with an identity quaternion) and +90° faces +X. `tracks.js` builds a gate normal as
+    `(sin y·cos p, sin p, −cos y·cos p)`; `physics.setSpawn()` matches it with a rotation of
+    *minus* yaw about +Y. Change one and the drone spawns facing away from the first gate.
 
 ## Caching — read this before debugging "my change did nothing"
 
@@ -127,6 +202,10 @@ console and shown under the Start button. **`index.html` itself is not versioned
 holding a stale copy keeps requesting the old module versions and none of the tags help. If the
 build stamp does not match, hard-reload (`Ctrl+Shift+R`) before investigating anything else. Bump
 every tag and `BUILD` together after editing any module.
+
+**Current build: `v24`** — the tags live in `index.html` (stylesheet and the `main.js` script), the
+import list at the top of `main.js`, the `tracks.js` import in `ui.js`, and the `BUILD` constant in
+`main.js`. All of them must read the same number.
 
 ## Key Milestones & Solved Problems
 
@@ -150,14 +229,26 @@ every tag and `BUILD` together after editing any module.
 9. **Video latency.** Adjustable 0–200 ms FPV feed delay. The view lags; the controls and the
    physics do not.
 10. **Camera uptilt.** 0–60°, default 10°, from the menu slider or the ↑/↓ arrow keys in flight.
+11. **Spawn points.** `physics.setSpawn()` and `renderer.setSpawnPoint()` place the drone and the
+    Line of Sight viewpoint anywhere, with a heading. Practice still starts at the origin; a race
+    starts on the track's grid, lined up with the first gate.
+12. **Race mode.** Gated courses with sub-frame lap timing, a fixed spec class, a persistent
+    per-track leaderboard, and a HUD with a timer, next-gate readout and an off-screen gate
+    pointer. One track so far: *Bando Gauntlet*, 17 gates, about 304 m a lap.
+13. **Two-sided gates.** A gate is taken from whichever side the drone arrives on. Directional
+    crossings had been rejecting perfectly good lines — overshoot a ring, swing back through it and
+    the run would sit there refusing to count it until you had gone round and re-taken it the "right"
+    way. Arming one gate at a time already prevents the repeat crossings the direction test was
+    there to stop, so the test bought nothing but frustration.
 
 ## Verification
 
-`physics.js` and `audio.js` are deliberately free of DOM dependencies so they can be driven
-headlessly under Node — against synthetic collision callbacks and a stubbed Web Audio API
+`physics.js`, `audio.js` and `latency.js` are deliberately free of DOM dependencies so they can be
+driven headlessly under Node — against synthetic collision callbacks and a stubbed Web Audio API
 respectively. Seven harnesses, **165 checks**, covering landing and settling, wall and corner
 strikes, restitution accuracy, friction, wedged contacts, tunnelling at racing speed, wind gating,
-the audio mapping, video-link delay, and the camera uptilt convention. All pass.
+the audio mapping, video-link delay, and the camera uptilt convention. All passed when they were
+written.
 
 Every harness reads the **shipped** file and none keeps a copy — a stale copy asserts against code
 that no longer exists, and one here produced four false results before it was caught. Two details
@@ -167,30 +258,45 @@ source is rewritten next to `node_modules` on every run rather than imported in 
 of the shipped source and executed — a rename breaks the extraction and fails the test instead of
 quietly passing.
 
-**They are not currently committed to this repository.** Re-creating them, or committing the
-existing ones under `tests/`, is the single cheapest way to protect the invariants listed above —
-most of them are exactly the kind of thing a well-meaning refactor quietly breaks.
+**They are not committed to this repository**, so nothing above can be re-run as it stands, and
+they predate race mode: `race.js` and `tracks.js` have no coverage at all. `race.js` cannot be
+imported under Node either (canvas labels, `localStorage`), so `testGate()` and the lap-clock
+arithmetic would need the same lift-the-method-out treatment as `renderer.js` — worth doing, since
+gate detection is pure geometry and exactly the kind of thing that is silently wrong.
+
+Committing these under `tests/` remains the single cheapest way to protect the invariants above.
 
 ## Known Limitations & Next Steps
 
-1. **Persistent storage.** Only camera mode, LOS zoom, camera uptilt, speed readout and audio
-   persist. Rates,
-   physics parameters and axis mappings reset on reload — the most disruptive gap, since a pilot's
-   rates and radio mapping are precisely what should be remembered. `localStorage` in `ui.js` and
-   `input.js`.
-2. **Commit the test harnesses** (see Verification).
+1. **Persistent storage.** Camera mode, LOS zoom, camera uptilt, speed readout, audio, game mode,
+   track, pilot name and the leaderboards persist. Rates, physics parameters and axis mappings
+   still reset on reload — the most disruptive gap, since a pilot's rates and radio mapping are
+   precisely what should be remembered. `localStorage` in `ui.js` and `input.js`.
+2. **Commit the test harnesses**, and write one for `race.js` (see Verification).
 3. **Per-motor thrust.** Thrust is a single force at the centre of mass. Four forces at the arm
    positions would unlock motor spool-up lag (thrust is instantaneous today), differential yaw
    authority, and prop wash.
 4. **Turtle mode.** Flipping an inverted drone by reversing two motors — the feature the project is
    named for, and still absent. Depends on per-motor thrust.
-5. **Spawn points and crash flow.** Spawn is hard-coded to `(0, 1, 0)` in `physics.js`, and the LOS
-   camera assumes ground at `y = 0`; a map whose floor sits elsewhere would leave the viewpoint
-   floating or buried. Per-map spawn points fix both. No crash detection or auto-reset yet.
+5. **Spawn and crash flow.** Spawn points exist, but practice is still hard-coded to `(0, 1, 0)` in
+   `main.js`, and the LOS viewpoint is still 5 m above `y = 0` and 3 m along +Z regardless of which
+   way the drone is facing — a map whose floor sits elsewhere leaves the pilot floating or buried,
+   and a grid facing +X puts them off to one side. Per-map spawn data and a spawn-relative LOS
+   offset fix both. There is still no crash detection or auto-reset.
 6. **Angle / horizon mode.** Acro only; a self-levelling mode makes day one possible.
 7. **Doppler and propagation delay.** Distance attenuation is in; a delay line whose length
    tracks range would add both the travel delay and the Doppler shift on a fast flyby.
-8. **Gates and lap timing**, then replay/ghost — the training loop the simulator is ultimately for.
+8. **Race depth.** One track, and no sector splits, no missed-gate handling (skip a gate and the run
+   simply waits for you to come back and take it, from whichever side you reach it), and no ghost or
+   replay — the obvious next rung of the training loop. There is deliberately no wrong-way rule left
+   to implement at the gate itself, since a gate no longer has a right way through; any future
+   wrong-way detection would have to work off the drone's progress round the course instead. The
+   board is per-browser `localStorage`, so "track record" means this browser's record.
+9. **Gate detection samples once per rendered frame**, off a straight segment between positions,
+   rather than per physics sub-step. It cannot miss a plane, but the straight-line approximation
+   coarsens on a tight arc through a 0.62 m ring at a low frame rate. Related: the off-screen gate
+   pointer is computed in `updateRace()` *before* `renderer.updateDrone()`, so it trails the
+   rendered picture by exactly one frame.
 
 ---
 *End of Handoff Document*

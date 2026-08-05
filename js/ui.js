@@ -1,6 +1,6 @@
 // ui.js - Handles DOM interactions and Menus
 
-import { TRACKS, DEFAULT_TRACK, formatTime } from './tracks.js?v=23';
+import { TRACKS, DEFAULT_TRACK, formatTime } from './tracks.js?v=24';
 
 export class UIHandler {
     constructor(physicsEngine, inputHandler, renderer, race, startCallback, resumeCallback, resetCallback, exitCallback) {
@@ -163,7 +163,7 @@ export class UIHandler {
         }
         if (this.elements.modeBlurb) {
             this.elements.modeBlurb.textContent = this.isRacing
-                ? 'Timed laps on a fixed spec. Fly the gates in order; every lap goes on the board.'
+                ? 'Timed laps on a fixed spec. Fly the gates in order — either side counts — and every lap goes on the board.'
                 : 'Free flight. Every setting is yours to change.';
         }
         if (this.elements.btnStart) {

@@ -293,16 +293,28 @@ export class RaceManager {
     }
 
     // Returns the fraction along prev->now at which the drone passed through the ring, or null.
-    // The crossing has to run along the gate normal, so cutting back through a gate you have
-    // already taken never counts as taking it again.
+    // Either direction counts: a gate is a hoop, and threading it the other way round is still
+    // threading it, so a line that approaches from the far side is a line and not a fault. The
+    // normal survives as the ring's orientation - it is what the disc is perpendicular to - it
+    // just no longer picks a side.
+    //
+    // Nothing here can be machine-gunned by a drone bouncing about in a ring, because only the
+    // one gate the run is waiting on is ever tested: the first crossing advances `nextGate` and
+    // the ring goes cold behind it.
     testGate(index, prev, now) {
         const gate = this.gates[index];
         const n = gate.normal;
         const d0 = (prev.x - gate.position.x) * n.x + (prev.y - gate.position.y) * n.y + (prev.z - gate.position.z) * n.z;
         const d1 = (now.x - gate.position.x) * n.x + (now.y - gate.position.y) * n.y + (now.z - gate.position.z) * n.z;
 
-        if (d0 >= 0 || d1 < 0) return null;
+        // Both ends of the segment on the same side of the plane - no crossing this frame. Zero
+        // counts as the front side throughout, which is what keeps a drone that lands exactly on
+        // the plane to a single crossing: arriving on it counts, leaving it does not, and sitting
+        // on it counts not at all.
+        if ((d0 < 0) === (d1 < 0)) return null;
 
+        // Signed distances of opposite sign, so this is in (0, 1] whichever way the plane was
+        // crossed and the sub-frame timing below works unchanged in both directions.
         const t = d0 / (d0 - d1);
         this._hit.set(
             prev.x + (now.x - prev.x) * t,

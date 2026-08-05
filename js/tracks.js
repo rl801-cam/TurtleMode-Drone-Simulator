@@ -9,9 +9,12 @@
 // `yaw` is the direction of travel through the gate, in degrees, measured the same way the
 // drone's heading is: 0 looks down -Z (the way the airframe faces at spawn), +90 looks down +X.
 // `pitch` tilts that direction out of the horizontal, +90 being straight up, so the normal is
-// (sin(yaw)cos(pitch), sin(pitch), -cos(yaw)cos(pitch)). The ring is built perpendicular to it
-// and a crossing only counts when the drone passes along it, which is what stops a gate lying
-// flat in a floor hatch from being taken on the way back down.
+// (sin(yaw)cos(pitch), sin(pitch), -cos(yaw)cos(pitch)). The ring is built perpendicular to it.
+// Since a gate counts from either side, yaw and pitch now only decide how the ring hangs in the
+// air, not which way it has to be flown: what matters is that the disc lies square across the
+// opening it is threaded through. A gate lying flat in a floor hatch counts on the way up and on
+// the way down alike, so the only thing keeping the two shaft gates apart is that a gate is armed
+// only when the run has reached it.
 //
 // `radius` overrides the track default for a single gate. The rings threaded through the wall
 // holes have to be smaller than the holes themselves.
@@ -64,7 +67,8 @@ export const TRACKS = {
             { name: 'PILLAR SLALOM',   x: -33.35, y: 2.60, z: -37.00, yaw:  -70, radius: 1.5 },
             { name: 'DEEP HALL',       x: -46.00, y: 2.70, z: -41.50, yaw:  -70, radius: 1.5 },
             // Lying flat in the opening through the first-floor slab. Run in level underneath,
-            // then stand it on its tail: the ring only counts on the way up.
+            // then stand it on its tail. The ring would count on the way down too, but the run
+            // arrives from below and the gate goes cold the moment it is taken.
             { name: 'THE SHAFT',       x: -57.76, y: 5.00, z: -46.90, yaw:    0, pitch:  90, radius: 2.0 },
             // Out of the second storey through the matching hole in the upper wall, 7.8 m up.
             { name: 'UPPER WALL HOLE', x: -37.11, y: 7.82, z: -46.91, yaw:   90, radius: 0.8 },
