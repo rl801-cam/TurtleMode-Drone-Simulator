@@ -3,7 +3,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
-import { GenerateMeshBVHWorker } from 'three-mesh-bvh/src/workers/GenerateMeshBVHWorker.js';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 
 // Extend BufferGeometry and Mesh prototypes with BVH methods
@@ -324,9 +323,24 @@ export class Renderer {
         });
     }
 
+    // Builds the collider for whatever is currently under environmentGroup.
+    //
+    // This runs on the main thread deliberately. three-mesh-bvh ships a Web Worker for the job and
+    // this used to try it first, but that worker cannot function in a project with no bundler: its
+    // module graph imports the bare specifier `three`, import maps are document-scoped, and nothing
+    // inside a worker can resolve it. The wrapper also exposes `dispose()`, not `terminate()`, and
+    // the old code called `terminate()` on every path — so the moment the worker was constructed at
+    // all, a TypeError fired before `resolve()` and this promise stayed pending for ever. Since
+    // `loadMap()` awaits it and `start()` awaits `loadMap()`, the launch menu sat on "Loading
+    // Map..." and never came back. Browsers that refuse to construct a cross-origin worker took the
+    // old catch branch and were fine, which is what made it look intermittent.
+    //
+    // Measured on `bando.glb` — 852 meshes, 868k triangles — the whole pipeline is about 490 ms,
+    // of which the tree itself is about 260 ms: one long frame while the menu is still up, next to
+    // a 45 MB download. There is no headroom here worth a second failure mode.
     generateCollisionBVH() {
         this.collisionReady = false;
-        
+
         // 1. Gather all collidable geometries
         const geometries = [];
         this.environmentGroup.traverse((child) => {
@@ -355,46 +369,14 @@ export class Renderer {
         // Dispose of cloned geometries to free memory
         geometries.forEach(g => g.dispose());
         
-        // 3. Build BVH using Web Worker (with synchronous fallback)
-        return new Promise((resolve) => {
-            const buildSync = () => {
-                mergedGeom.computeBoundsTree();
-                this.colliderMesh = new THREE.Mesh(mergedGeom);
-                this.collisionReady = true;
-                console.log("BVH generated successfully on main thread.");
-                resolve();
-            };
-
-            try {
-                console.log("Generating collision BVH tree asynchronously...");
-                const worker = new GenerateMeshBVHWorker();
-                
-                // Set a timeout of 3 seconds. If it doesn't resolve, fall back to sync
-                const timeoutId = setTimeout(() => {
-                    console.warn("Worker BVH generation timed out. Falling back to main thread.");
-                    worker.terminate();
-                    buildSync();
-                }, 3000);
-                
-                worker.generate(mergedGeom).then(bvh => {
-                    clearTimeout(timeoutId);
-                    mergedGeom.boundsTree = bvh;
-                    this.colliderMesh = new THREE.Mesh(mergedGeom);
-                    this.collisionReady = true;
-                    console.log("BVH generated successfully via Web Worker.");
-                    worker.terminate();
-                    resolve();
-                }).catch(err => {
-                    clearTimeout(timeoutId);
-                    console.warn("Worker BVH generation failed, falling back to main thread:", err);
-                    worker.terminate();
-                    buildSync();
-                });
-            } catch (e) {
-                console.warn("Failed to initialize GenerateMeshBVHWorker, running on main thread:", e);
-                buildSync();
-            }
-        });
+        // 3. Build the BVH. Synchronous, and it either finishes or throws - there is no path here
+        // that can leave the caller waiting on a promise that never settles.
+        const t0 = performance.now();
+        mergedGeom.computeBoundsTree();
+        this.colliderMesh = new THREE.Mesh(mergedGeom);
+        this.collisionReady = true;
+        console.log(`Collision BVH built in ${Math.round(performance.now() - t0)} ms.`);
+        return Promise.resolve();
     }
 
     // Sweeps a ray along the path the drone travelled during one physics sub-step. At racing

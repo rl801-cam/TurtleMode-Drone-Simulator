@@ -36,7 +36,7 @@ hosted on GitHub Pages. Two modes: **Practice**, free flight with every paramete
 **Module caching:** `index.html` and the imports in `main.js` and `ui.js` carry a `?v=N`
 cache-busting tag, and the running build is logged to the console and shown in the launch menu.
 Bump every tag and the `BUILD` constant together after editing any module — **the current build is
-`v24`**. `index.html` itself is not versioned, so a browser holding a stale copy of it will keep
+`v25`**. `index.html` itself is not versioned, so a browser holding a stale copy of it will keep
 requesting the old module versions — check the build stamp before debugging anything that looks
 like an unapplied change.
 
@@ -58,8 +58,8 @@ like an unapplied change.
 - Adjustable mass, max thrust and air drag.
 
 ### 3.3 Collision & Crash Physics
-Map geometry is merged into a single BVH (built in a Web Worker, with a main-thread fallback), and
-contacts are resolved by a custom impulse solver rather than Cannon-es's narrowphase:
+Map geometry is merged into a single BVH on the main thread, and contacts are resolved by a custom
+impulse solver rather than Cannon-es's narrowphase:
 
 - **Five contact spheres** — one per motor plus the airframe centre, kept coplanar with the centre
   of mass so a square-on wall strike has no lever arm and does not tumble.
@@ -81,6 +81,12 @@ contacts are resolved by a custom impulse solver rather than Cannon-es's narrowp
   `URL.createObjectURL` — no backend needed.
 - Collision geometry is generated automatically for whichever map is loaded.
 - Adjustable surface grip and restitution.
+- **Load cost.** `bando.glb` is 45.7 MB — 852 meshes, 868k triangles, uncompressed, no textures.
+  Everything after the download is cheap by comparison: measured end to end, GLTF parse, clone and
+  transform, merge and BVH come to about 490 ms, of which the tree is about 260 ms. So the wait on
+  a first visit is very nearly all transfer, and on later visits the browser cache makes it
+  disappear. Draco or meshopt compression is the one change that would move it; both need a build
+  step and a decoder, so neither is in yet.
 
 ### 3.5 Cameras
 - **FPV** — 90° FOV, mounted on the airframe.

@@ -3,19 +3,19 @@
 // The ?v= tags are cache busters, matching the one on style.css. Browsers cache ES modules
 // aggressively, so without them an edited module can keep running from cache against fresh
 // HTML. Bump every one of these (and the two in index.html) together after changing any file.
-import { Renderer } from './renderer.js?v=24';
-import { PhysicsEngine } from './physics.js?v=24';
-import { InputHandler } from './input.js?v=24';
-import { UIHandler } from './ui.js?v=24';
-import { AudioEngine } from './audio.js?v=24';
-import { VideoDelay } from './latency.js?v=24';
-import { RaceManager } from './race.js?v=24';
-import { RACE_SPEC, formatTime } from './tracks.js?v=24';
+import { Renderer } from './renderer.js?v=25';
+import { PhysicsEngine } from './physics.js?v=25';
+import { InputHandler } from './input.js?v=25';
+import { UIHandler } from './ui.js?v=25';
+import { AudioEngine } from './audio.js?v=25';
+import { VideoDelay } from './latency.js?v=25';
+import { RaceManager } from './race.js?v=25';
+import { RACE_SPEC, formatTime } from './tracks.js?v=25';
 
 // Shown in the launch menu and logged on boot. index.html itself carries no cache buster, so a
 // browser holding a stale copy of it will keep loading the old ?v= modules and none of the tags
 // above will help. If this does not match the newest version, the page needs a hard reload.
-const BUILD = 'v24';
+const BUILD = 'v25';
 
 class Simulator {
     constructor() {
@@ -151,10 +151,14 @@ class Simulator {
         }
 
         this.physics.reset();
-        this.state = 'PLAYING';
-        this.lastTime = performance.now();
         this.videoDelay.clear();
         this.renderer.resetCamera();
+
+        // Nothing may go to PLAYING before the collider exists. `animate()` steps physics on that
+        // state alone, and `checkCollision()` answers null until the BVH is ready - so starting the
+        // clock first left the drone free-falling through an empty world for the whole of a 45 MB
+        // download, and the race began somewhere under the map. It also means a map that fails to
+        // load leaves us in MENU, where the caller's error path can be seen.
         await this.renderer.loadMap(mapChoice);
 
         if (this.mode === 'race') {
@@ -165,6 +169,9 @@ class Simulator {
             this.race.clearTrack();
             this.race.setVisible(false);
         }
+
+        this.state = 'PLAYING';
+        this.lastTime = performance.now();
     }
 
     pause() {

@@ -1,6 +1,6 @@
 // ui.js - Handles DOM interactions and Menus
 
-import { TRACKS, DEFAULT_TRACK, formatTime } from './tracks.js?v=24';
+import { TRACKS, DEFAULT_TRACK, formatTime } from './tracks.js?v=25';
 
 export class UIHandler {
     constructor(physicsEngine, inputHandler, renderer, race, startCallback, resumeCallback, resetCallback, exitCallback) {
