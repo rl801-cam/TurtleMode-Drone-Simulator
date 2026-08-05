@@ -36,7 +36,7 @@ hosted on GitHub Pages. Two modes: **Practice**, free flight with every paramete
 **Module caching:** `index.html` and the imports in `main.js` and `ui.js` carry a `?v=N`
 cache-busting tag, and the running build is logged to the console and shown in the launch menu.
 Bump every tag and the `BUILD` constant together after editing any module — **the current build is
-`v25`**. `index.html` itself is not versioned, so a browser holding a stale copy of it will keep
+`v26`**. `index.html` itself is not versioned, so a browser holding a stale copy of it will keep
 requesting the old module versions — check the build stamp before debugging anything that looks
 like an unapplied change.
 

@@ -3,19 +3,19 @@
 // The ?v= tags are cache busters, matching the one on style.css. Browsers cache ES modules
 // aggressively, so without them an edited module can keep running from cache against fresh
 // HTML. Bump every one of these (and the two in index.html) together after changing any file.
-import { Renderer } from './renderer.js?v=25';
-import { PhysicsEngine } from './physics.js?v=25';
-import { InputHandler } from './input.js?v=25';
-import { UIHandler } from './ui.js?v=25';
-import { AudioEngine } from './audio.js?v=25';
-import { VideoDelay } from './latency.js?v=25';
-import { RaceManager } from './race.js?v=25';
-import { RACE_SPEC, formatTime } from './tracks.js?v=25';
+import { Renderer } from './renderer.js?v=26';
+import { PhysicsEngine } from './physics.js?v=26';
+import { InputHandler } from './input.js?v=26';
+import { UIHandler } from './ui.js?v=26';
+import { AudioEngine } from './audio.js?v=26';
+import { VideoDelay } from './latency.js?v=26';
+import { RaceManager } from './race.js?v=26';
+import { RACE_SPEC, formatTime } from './tracks.js?v=26';
 
 // Shown in the launch menu and logged on boot. index.html itself carries no cache buster, so a
 // browser holding a stale copy of it will keep loading the old ?v= modules and none of the tags
 // above will help. If this does not match the newest version, the page needs a hard reload.
-const BUILD = 'v25';
+const BUILD = 'v26';
 
 class Simulator {
     constructor() {
@@ -152,7 +152,6 @@ class Simulator {
 
         this.physics.reset();
         this.videoDelay.clear();
-        this.renderer.resetCamera();
 
         // Nothing may go to PLAYING before the collider exists. `animate()` steps physics on that
         // state alone, and `checkCollision()` answers null until the BVH is ready - so starting the
@@ -169,6 +168,15 @@ class Simulator {
             this.race.clearTrack();
             this.race.setVisible(false);
         }
+
+        // Aiming the camera has to be the last thing before the state flip, with no await between
+        // the two. The menu's orbiting shot runs on every MENU frame, and in FPV the camera is a
+        // child of the drone mesh, so that shot is written into the camera's *local* transform.
+        // Resetting before the map load handed all ~500 ms of loading frames the chance to undo it,
+        // and the first flying frame looked out from a metre or two off the airframe pointing
+        // nowhere near the nose - which reads as the drone having spawned in the wrong place. R put
+        // it right only because by then MENU was over and `reset()` re-aimed the camera for good.
+        this.renderer.resetCamera();
 
         this.state = 'PLAYING';
         this.lastTime = performance.now();
@@ -201,10 +209,14 @@ class Simulator {
     exit() {
         this.race.clearTrack();
         this.mode = 'practice';
-        // Put the drone back at the origin so the menu's orbiting camera has it in frame
+        // Put the drone back at the origin so the menu's orbiting camera has it in frame. The mesh
+        // has to be moved too: `animate()` only syncs it while PLAYING, so without this it stays
+        // sitting wherever the last flight ended - and since the menu shot orbits the origin, and in
+        // FPV hangs off the drone mesh, it would be framing empty map.
         this.physics.setSpawn(0, 1, 0, 0);
         this.renderer.setSpawnPoint(0, 1, 0);
         this.physics.reset();
+        this.renderer.updateDrone(this.physics.getDroneState());
         this.audio.silence();
         this.state = 'MENU';
         // Reset camera lookat for menu

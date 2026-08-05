@@ -149,22 +149,33 @@ Each of these was found the hard way. They are load-bearing.
    that state alone and `checkCollision()` returns null until the BVH exists, so setting it before
    the `await` left the drone free-falling through an empty world for the length of the download and
    starting the race somewhere under the map.
-9. **`renderer.checkCollision()` returns shared scratch state**, invalidated by the next call. Copy
-   what you need before querying again.
-10. **`updateConfig()` merges nested objects.** `{ wind: { roll: true } }` leaves pitch and yaw
+9. **`renderer.resetCamera()` must be the last thing before the flip to `PLAYING`, with no `await`
+   between the two.** The menu's orbiting shot in `animate()` runs on every `MENU` frame and writes
+   straight into the camera — and in FPV the camera is a child of the drone mesh, so what it writes
+   is a *local* transform. Resetting before `await loadMap()` therefore handed every loading frame
+   (a 45 MB download plus ~500 ms of collider build) the chance to undo it, and the first flying
+   frame looked out from a metre or two off the airframe pointing nowhere near the nose — which
+   reads as the drone having spawned in the wrong place, not as a camera fault. Pressing R appeared
+   to "fix the spawn" only because by then `MENU` was over and `reset()` re-aimed the camera for
+   good. `exit()` has the mirror-image trap: `animate()` syncs the drone mesh only while `PLAYING`,
+   so the mesh must be moved back to the origin explicitly or the menu shot orbits the origin while
+   the camera hangs off a mesh still sitting at the last crash site.
+10. **`renderer.checkCollision()` returns shared scratch state**, invalidated by the next call. Copy
+    what you need before querying again.
+11. **`updateConfig()` merges nested objects.** `{ wind: { roll: true } }` leaves pitch and yaw
     untouched — correct for the per-axis checkboxes, but a trap in tests and callers that assume a
     full replacement.
-11. **Audio has three independent drivers.** Motor noise comes from the stick inputs and is gated
+12. **Audio has three independent drivers.** Motor noise comes from the stick inputs and is gated
     on arming; wind noise comes from `droneBody.velocity` and deliberately is not, since a
     disarmed drone still falls through air; distance attenuation comes from
     `renderer.getListenerDistance()`, which is zero in FPV because the listener rides the
     airframe. Do not collapse them onto one input. Attenuation sits on the master output so it
     applies to every layer — adding a new layer means routing it through `master`, not to
     `destination`.
-12. **The AudioContext must be created from a user gesture.** It is started inside
+13. **The AudioContext must be created from a user gesture.** It is started inside
     `Simulator.start()`, which is reached synchronously from the Start button's click handler. Move
     it and audio silently never plays.
-13. **Video latency delays the view only, and only in FPV.** `physics.setInputs()` takes the live
+14. **Video latency delays the view only, and only in FPV.** `physics.setInputs()` takes the live
     sticks and the solver runs live — the drone is genuinely where the physics says, the pilot
     just finds out late, which is the whole point. The delay is applied to the pose handed to
     `renderer.updateDrone()`, and in FPV the camera is a child of the drone mesh, so delaying the
@@ -176,7 +187,7 @@ Each of these was found the hard way. They are load-bearing.
     interpolated with shortest-arc slerp, since componentwise blending of quaternions leaves an
     unnormalised one that shears the whole picture. The buffer is cleared on reset, or the view
     replays the old flight after the teleport.
-14. **Camera uptilt is a positive rotation about the camera's local X.** The camera looks down its
+15. **Camera uptilt is a positive rotation about the camera's local X.** The camera looks down its
     own −Z, so a positive angle lifts the forward vector to `(0, sin, −cos)` — get the sign wrong
     and the "uptilt" points at the ground. It is applied in exactly one place,
     `renderer.applyFpvUptilt()`, called from construction, `resetCamera()` and `setFpvUptilt()`;
@@ -184,32 +195,32 @@ Each of these was found the hard way. They are load-bearing.
     value and the UI stores *that*, so the slider can never drift outside the range. One trap in
     `ui.js`: the stored angle is read with `Number.isFinite`, not `|| 10` — 0° is a legitimate
     setting that `||` would silently overwrite.
-15. **Turbulence wind is suppressed while the drone is touching a surface**, with a short grace
+16. **Turbulence wind is suppressed while the drone is touching a surface**, with a short grace
     period so contact flicker on uneven map geometry does not let it back in. Note the naming: the
     *wind* in `physics.js` is a disturbance torque, while `air*` in `audio.js` is the sound of
     moving through air. They are unrelated.
-16. **Gates are parented to `renderer.scene`, never to `environmentGroup`.** The collision BVH is
+17. **Gates are parented to `renderer.scene`, never to `environmentGroup`.** The collision BVH is
     built by merging everything under `environmentGroup`, so a gate placed there becomes solid and
     a racing line turns into a lottery. Parenting to the scene also keeps the rings clear of the
     map teardown, which empties `environmentGroup` on every load.
-17. **The lap clock times the drone, not the picture.** `race.update()` is handed
+18. **The lap clock times the drone, not the picture.** `race.update()` is handed
     `physics.droneBody.position`, never the delayed pose out of `latency.js`. Feed it the video
     feed and a lap time starts depending on the latency slider.
-18. **A crossing counts from either side, but only inside the radius, and only on the armed gate.**
+19. **A crossing counts from either side, but only inside the radius, and only on the armed gate.**
     Two-sided detection is safe *because* just one gate is live at a time and taking it advances the
     run past it — that is what used to be bought by the direction test, and if a future change ever
     arms more than one gate at once (sector splits, missed-gate recovery), the machine-gunning it
     used to prevent comes straight back and needs a cooldown or a re-arm rule of its own. The radial
     test is untouched and non-negotiable: drop it and the entire infinite plane counts as a gate.
-19. **`RACE_SPEC` clobbers the physics config, so practice has to put it back.** A practice start
+20. **`RACE_SPEC` clobbers the physics config, so practice has to put it back.** A practice start
     calls `ui.applyPracticeConfig()`, which pushes every practice control's current DOM value into
     the engine. Skip it and a pilot who has raced once flies the spec drone while the sliders read
     like their own settings.
-20. **Gate coordinates in `tracks.js` are survey data.** They were measured against the `bando.glb`
+21. **Gate coordinates in `tracks.js` are survey data.** They were measured against the `bando.glb`
     collision mesh, several sit inside openings a metre or two across, and the smallest rings
     (`radius: 0.62`, under the solar array) have centimetres to spare. Moving a gate half a metre
     is likely to bury it in a wall, a panel or the first-floor slab. Re-measure before editing.
-21. **One yaw convention, shared by gates and spawn.** 0° faces −Z (the way the airframe points
+22. **One yaw convention, shared by gates and spawn.** 0° faces −Z (the way the airframe points
     with an identity quaternion) and +90° faces +X. `tracks.js` builds a gate normal as
     `(sin y·cos p, sin p, −cos y·cos p)`; `physics.setSpawn()` matches it with a rotation of
     *minus* yaw about +Y. Change one and the drone spawns facing away from the first gate.
@@ -222,7 +233,7 @@ holding a stale copy keeps requesting the old module versions and none of the ta
 build stamp does not match, hard-reload (`Ctrl+Shift+R`) before investigating anything else. Bump
 every tag and `BUILD` together after editing any module.
 
-**Current build: `v25`** — the tags live in `index.html` (stylesheet and the `main.js` script), the
+**Current build: `v26`** — the tags live in `index.html` (stylesheet and the `main.js` script), the
 import list at the top of `main.js`, the `tracks.js` import in `ui.js`, and the `BUILD` constant in
 `main.js`. All of them must read the same number.
 
