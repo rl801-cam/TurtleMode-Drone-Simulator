@@ -20,6 +20,9 @@ the airframe to a fixed spec and times laps round a gated course, with a persist
 * **Collision geometry:** three-mesh-bvh `0.7.3`
 * **Audio:** Web Audio API, fully synthesised
 * **Models:** GLTFLoader for `.glb` / `.gltf` maps
+* **Map tools:** plain Node under `tools/`, no dependencies at all — the glTF container, the PNG
+  textures and the previews are all written by hand. They run offline and ship nothing to the
+  browser.
 
 ## Architecture & File Structure
 
@@ -38,6 +41,10 @@ the airframe to a fixed spec and times laps round a gated course, with a persist
 * **`js/race.js`** — gate meshes, crossing detection, the lap clock, and the `localStorage`
   leaderboard.
 * **`js/tracks.js`** — course data (gate positions, radii, spawn) and the fixed racing spec.
+* **`tools/`** — offline map generation. `generate-rift-quarry.mjs` builds `rift-quarry.glb` and
+  the survey the *Rift Run* gates come from; `inspect-glb.mjs` reads any `.glb` back; `lib/` holds
+  the glTF writer, the noise, the procedural textures, the clearance checker and a software
+  rasteriser for previews. Nothing here is loaded by the page.
 
 ### Default configuration
 Mass `0.5 kg` · Max thrust `25 N` (~5:1 TWR, hover near 20% throttle) · Air drag `0.5` ·
@@ -103,6 +110,41 @@ hand-edited or half-written store is filtered rather than trusted. It is also pe
 `clearTrack()` disposes the ring geometry, the ring material, and both the sprite material and its
 canvas texture. Labels are canvas textures, so dropping the group without disposing them leaks a
 texture per gate on every track change.
+
+## The generated map
+
+`bando.glb` was downloaded and the *Bando Gauntlet* gates were then measured against it by eye.
+`rift-quarry.glb` works the other way round: it is produced by `tools/generate-rift-quarry.mjs`,
+and the racing line is defined in the same constants the geometry is built from.
+
+```
+node tools/generate-rift-quarry.mjs                 # writes rift-quarry.glb + the survey
+node tools/generate-rift-quarry.mjs --preview out   # ...and renders it from six viewpoints
+node tools/inspect-glb.mjs rift-quarry.glb          # reads any .glb back and says what is in it
+```
+
+Everything is seeded, so the same source always produces the same map — which matters, because
+the gate coordinates in `tracks.js` are surveyed against these triangles. **Do not hand-edit the
+`rift-run` gates.** Change the layout block at the top of the generator and regenerate both.
+
+**The generator surveys the course before it writes the file.** All the geometry is in memory, so
+every gate ring is sampled round its circumference and every leg of the flown line is walked at
+0.4 m intervals, each measured against the nearest triangle by a spatial hash (`lib/clearance.mjs`).
+The result is printed as a table and written to `tools/rift-quarry-survey.json`, and the build
+*fails* if a ring drops below 0.35 m of clearance or a leg below 1.0 m. That check has already
+caught four gates buried in geometry and a racing line that went through a spoil heap and a
+pipe-rack leg. It is a straight-line test between waypoints, so it proves the corridor exists —
+not that every possible line through it is clean.
+
+**The previews are not decoration either.** `lib/preview.mjs` is a z-buffered software rasteriser
+over the same triangle arrays. It found two bugs nothing else would have: the rock arch was wound
+inside out — invisible in a single-sided material — and the pipe run was two 26 m vertical poles,
+because `addCylinder` builds along +Y and its `yaw` rotates about Y, so no value of it can lay a
+cylinder on its side. Both now have self-tests that fail the build.
+
+As shipped: **49.6 MB, 762k triangles, 139 meshes**, of which 23.8 MB is seven embedded PNG
+textures. The triangle count is a little under bando's 868k; the file is a little larger because
+bando carries no textures at all. Rebuilding takes about 15 s.
 
 ## Invariants — break these and the sim misbehaves in non-obvious ways
 
@@ -224,6 +266,25 @@ Each of these was found the hard way. They are load-bearing.
     with an identity quaternion) and +90° faces +X. `tracks.js` builds a gate normal as
     `(sin y·cos p, sin p, −cos y·cos p)`; `physics.setSpawn()` matches it with a rotation of
     *minus* yaw about +Y. Change one and the drone spawns facing away from the first gate.
+23. **Sky colour and fog are per map, in `MAP_ENV` in `renderer.js`.** Anything without an entry
+    keeps the original 20–100 m fog, which is right for the bando — a building you fly around
+    inside — and wrong for a 300 m quarry, where it hides the far wall, the ravine and the whole
+    basin rim behind a hundred metres of haze. Practice still starts at `(0, 1, 0)` whatever map is
+    loaded, so a new map has to have solid ground just under the origin or the drone starts by
+    falling; the quarry's apron is flat `y = 0` there for exactly that reason.
+24. **Terrain quads must be split along the diagonal joining the closer pair of heights.**
+    Alternating the diagonal in a checker pattern — the obvious way to avoid a directional grain —
+    corrugates every steep face, because one orientation lays a ridge across the slope and the
+    other a groove. On the quarry's 62° bench walls that came out as a row of sawtooth teeth about
+    a metre apart, in the silhouette as well as the shading.
+25. **A single-sided material makes winding load-bearing.** Terrain, rock, ground, concrete and the
+    yard are single-sided, so a face wound the wrong way is not merely mis-lit, it is *gone*. The
+    arch band is the one piece whose winding is not obvious from the code — its faces are built
+    about the ring's own (span, up, dir) frame and the intuitive order faces into the stone — so it
+    has its own check, `verifyArch()`. Add geometry of that shape and check it the same way.
+26. **Nothing scattered may land in the racing corridor.** Boulders, spoil heaps, light masts and
+    the rim berm are all filtered against the racing line before placement. The line is built first
+    for that reason, and `LINE_XZ` has to be set before any of them run.
 
 ## Caching — read this before debugging "my change did nothing"
 
@@ -233,7 +294,7 @@ holding a stale copy keeps requesting the old module versions and none of the ta
 build stamp does not match, hard-reload (`Ctrl+Shift+R`) before investigating anything else. Bump
 every tag and `BUILD` together after editing any module.
 
-**Current build: `v26`** — the tags live in `index.html` (stylesheet and the `main.js` script), the
+**Current build: `v27`** — the tags live in `index.html` (stylesheet and the `main.js` script), the
 import list at the top of `main.js`, the `tracks.js` import in `ui.js`, and the `BUILD` constant in
 `main.js`. All of them must read the same number.
 
@@ -270,6 +331,12 @@ import list at the top of `main.js`, the `tracks.js` import in `ui.js`, and the 
     the run would sit there refusing to count it until you had gone round and re-taken it the "right"
     way. Arming one gate at a time already prevents the repeat crossings the direction test was
     there to stop, so the test bought nothing but frustration.
+14. **A generated map and a second track.** *Rift Quarry* — a 300 m terraced quarry basin with a
+    plant yard, a shed you fly through end to end, a conveyor to duck under, four benches spiralling
+    22 m down to the pit floor, a bored adit through a rock plug, and a 93 m ravine climbing back to
+    the yard under a natural arch. The course on it, **Rift Run**, is 17 gates and about 422 m a lap.
+    Both come out of `tools/generate-rift-quarry.mjs` (see *The generated map*), which is also the
+    first thing in this project that verifies a course automatically rather than by flying it.
 
 ## Verification
 
@@ -296,6 +363,12 @@ gate detection is pure geometry and exactly the kind of thing that is silently w
 
 Committing these under `tests/` remains the single cheapest way to protect the invariants above.
 
+The map generator is the exception: its checks *are* committed and run every time it builds.
+`selfTest()` asserts that boxes, cylinders and tubes come out facing outwards, `verifyArch()` that
+the arch does, `verifyGLB()` re-reads the finished file and validates the container, and the course
+survey fails the build if a gate no longer fits. None of that covers `race.js`, which is still the
+gap that matters most.
+
 ## Known Limitations & Next Steps
 
 1. **Persistent storage.** Camera mode, LOS zoom, camera uptilt, speed readout, audio, game mode,
@@ -316,12 +389,19 @@ Committing these under `tests/` remains the single cheapest way to protect the i
 6. **Angle / horizon mode.** Acro only; a self-levelling mode makes day one possible.
 7. **Doppler and propagation delay.** Distance attenuation is in; a delay line whose length
    tracks range would add both the travel delay and the Doppler shift on a fast flyby.
-8. **Race depth.** One track, and no sector splits, no missed-gate handling (skip a gate and the run
-   simply waits for you to come back and take it, from whichever side you reach it), and no ghost or
-   replay — the obvious next rung of the training loop. There is deliberately no wrong-way rule left
-   to implement at the gate itself, since a gate no longer has a right way through; any future
-   wrong-way detection would have to work off the drone's progress round the course instead. The
-   board is per-browser `localStorage`, so "track record" means this browser's record.
+8. **Race depth.** Two tracks, but no sector splits, no missed-gate handling (skip a gate and the
+   run simply waits for you to come back and take it, from whichever side you reach it), and no
+   ghost or replay — the obvious next rung of the training loop. There is deliberately no wrong-way
+   rule left to implement at the gate itself, since a gate no longer has a right way through; any
+   future wrong-way detection would have to work off the drone's progress round the course instead.
+   The board is per-browser `localStorage`, so "track record" means this browser's record.
+10. **Map download size and draw load.** `rift-quarry.glb` is 49.6 MB against bando's 43.6 MB, and
+    like bando it is uncompressed — Draco or meshopt would move both, and both need a build step
+    and a decoder. Two things about the quarry are worth knowing: 23.8 MB of it is embedded PNG,
+    which is the single easiest thing to trade away (the sizes are one line at the top of the
+    generator), and the terrain is split into 8×8 tiles per material specifically so Three.js can
+    frustum-cull it. Left as one sheet the ground was submitted whole every frame, and again for
+    the shadow map. There is no LOD and no occlusion culling on either map.
 9. **Gate detection samples once per rendered frame**, off a straight segment between positions,
    rather than per physics sub-step. It cannot miss a plane, but the straight-line approximation
    coarsens on a tight arc through a 0.62 m ring at a low frame rate. Related: the off-screen gate

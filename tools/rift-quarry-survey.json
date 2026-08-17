@@ -1,0 +1,707 @@
+{
+  "map": "rift-quarry",
+  "lapLength": 422,
+  "spawn": {
+    "x": 22,
+    "y": 1,
+    "z": 40,
+    "yaw": 0
+  },
+  "gates": [
+    {
+      "name": "START / FINISH",
+      "x": 22,
+      "y": 3,
+      "z": 26,
+      "yaw": 0,
+      "pitch": 0.9,
+      "radius": 2.4
+    },
+    {
+      "name": "SHED IN",
+      "x": 22,
+      "y": 3.3,
+      "z": 10.8,
+      "yaw": 0,
+      "pitch": 0.57,
+      "radius": 2.4
+    },
+    {
+      "name": "SHED OUT",
+      "x": 22,
+      "y": 3.3,
+      "z": -18.8,
+      "yaw": 0,
+      "pitch": 0.78,
+      "radius": 2.4
+    },
+    {
+      "name": "THE BELT",
+      "x": -8,
+      "y": 4,
+      "z": -36.4,
+      "yaw": -71.96,
+      "pitch": 1.22,
+      "radius": 2.8
+    },
+    {
+      "name": "RIM DROP",
+      "x": -18.3,
+      "y": 4.5,
+      "z": -39.13,
+      "yaw": -43.81,
+      "pitch": -6.23,
+      "radius": 2.8
+    },
+    {
+      "name": "BENCH ONE",
+      "x": -29.48,
+      "y": -1,
+      "z": -60.46,
+      "yaw": -47.94,
+      "pitch": -13.91,
+      "radius": 2.6
+    },
+    {
+      "name": "BENCH TWO",
+      "x": -48.35,
+      "y": -6.5,
+      "z": -67.87,
+      "yaw": -90.11,
+      "pitch": -17.08,
+      "radius": 2.6
+    },
+    {
+      "name": "BENCH THREE",
+      "x": -62.8,
+      "y": -12,
+      "z": -61.92,
+      "yaw": -140.48,
+      "pitch": -22.26,
+      "radius": 2.6
+    },
+    {
+      "name": "PIT FLOOR",
+      "x": -64.69,
+      "y": -17.5,
+      "z": -50.02,
+      "yaw": 163.78,
+      "pitch": -6.09,
+      "radius": 2.8
+    },
+    {
+      "name": "THE ADIT",
+      "x": -55.3,
+      "y": -15.19,
+      "z": -11.2,
+      "yaw": 170.79,
+      "pitch": 10.66,
+      "radius": 2.2
+    },
+    {
+      "name": "RAVINE ONE",
+      "x": -52.39,
+      "y": -11.34,
+      "z": 0.44,
+      "yaw": 163.26,
+      "pitch": 13.16,
+      "radius": 3
+    },
+    {
+      "name": "RAVINE TWO",
+      "x": -46.95,
+      "y": -7.21,
+      "z": 15.47,
+      "yaw": 159.18,
+      "pitch": 14.93,
+      "radius": 3
+    },
+    {
+      "name": "RAVINE THREE",
+      "x": -41.55,
+      "y": -3.16,
+      "z": 28.39,
+      "yaw": 152.08,
+      "pitch": 14.95,
+      "radius": 3
+    },
+    {
+      "name": "THE ARCH",
+      "x": -36.63,
+      "y": -0.61,
+      "z": 37.05,
+      "yaw": 148.88,
+      "pitch": 17.17,
+      "radius": 3
+    },
+    {
+      "name": "CONTAINER RUN",
+      "x": 14,
+      "y": 3.2,
+      "z": 52.5,
+      "yaw": 91.68,
+      "pitch": 0.34,
+      "radius": 2.5
+    },
+    {
+      "name": "TANK TURN",
+      "x": 57,
+      "y": 5,
+      "z": 44,
+      "yaw": -6.34,
+      "pitch": 0,
+      "radius": 2.6
+    },
+    {
+      "name": "PIPE RACK",
+      "x": 34,
+      "y": 4,
+      "z": 34,
+      "yaw": -81.25,
+      "pitch": -2.61,
+      "radius": 2.4
+    }
+  ],
+  "clearance": {
+    "legs": [
+      {
+        "from": "START / FINISH",
+        "to": "SHED IN",
+        "clearance": 3,
+        "length": 15.2,
+        "at": {
+          "x": 22,
+          "y": 3,
+          "z": 26
+        }
+      },
+      {
+        "from": "SHED IN",
+        "to": "via 2",
+        "clearance": 3.3,
+        "length": 14.8,
+        "at": {
+          "x": 22,
+          "y": 3.3,
+          "z": 10.8
+        }
+      },
+      {
+        "from": "via 2",
+        "to": "SHED OUT",
+        "clearance": 3.3,
+        "length": 14.8,
+        "at": {
+          "x": 22,
+          "y": 3.3,
+          "z": -4
+        }
+      },
+      {
+        "from": "SHED OUT",
+        "to": "via 4",
+        "clearance": 3.3,
+        "length": 7.21,
+        "at": {
+          "x": 22,
+          "y": 3.3,
+          "z": -18.8
+        }
+      },
+      {
+        "from": "via 4",
+        "to": "THE BELT",
+        "clearance": 3.6,
+        "length": 31.75,
+        "at": {
+          "x": 22,
+          "y": 3.6,
+          "z": -26
+        }
+      },
+      {
+        "from": "THE BELT",
+        "to": "RIM DROP",
+        "clearance": 4,
+        "length": 10.66,
+        "at": {
+          "x": -8,
+          "y": 4,
+          "z": -36.4
+        }
+      },
+      {
+        "from": "RIM DROP",
+        "to": "via 7",
+        "clearance": 2.17,
+        "length": 13.07,
+        "at": {
+          "x": -22.27,
+          "y": 1.75,
+          "z": -51.27
+        }
+      },
+      {
+        "from": "via 7",
+        "to": "BENCH ONE",
+        "clearance": 2.17,
+        "length": 12.01,
+        "at": {
+          "x": -22.27,
+          "y": 1.75,
+          "z": -51.27
+        }
+      },
+      {
+        "from": "BENCH ONE",
+        "to": "via 9",
+        "clearance": 2.17,
+        "length": 11.21,
+        "at": {
+          "x": -38.75,
+          "y": -3.75,
+          "z": -66.14
+        }
+      },
+      {
+        "from": "via 9",
+        "to": "BENCH TWO",
+        "clearance": 2.17,
+        "length": 10.14,
+        "at": {
+          "x": -38.75,
+          "y": -3.75,
+          "z": -66.14
+        }
+      },
+      {
+        "from": "BENCH TWO",
+        "to": "via 11",
+        "clearance": 2.28,
+        "length": 8.91,
+        "at": {
+          "x": -56.65,
+          "y": -9.25,
+          "z": -66.11
+        }
+      },
+      {
+        "from": "via 11",
+        "to": "BENCH THREE",
+        "clearance": 2.28,
+        "length": 7.94,
+        "at": {
+          "x": -56.96,
+          "y": -9.39,
+          "z": -65.9
+        }
+      },
+      {
+        "from": "BENCH THREE",
+        "to": "via 13",
+        "clearance": 2.74,
+        "length": 7.17,
+        "at": {
+          "x": -64.66,
+          "y": -14.14,
+          "z": -57.12
+        }
+      },
+      {
+        "from": "via 13",
+        "to": "PIT FLOOR",
+        "clearance": 2.91,
+        "length": 6.37,
+        "at": {
+          "x": -65.2,
+          "y": -14.75,
+          "z": -55.75
+        }
+      },
+      {
+        "from": "PIT FLOOR",
+        "to": "via 15",
+        "clearance": 3.76,
+        "length": 20.16,
+        "at": {
+          "x": -60.75,
+          "y": -17.5,
+          "z": -38.83
+        }
+      },
+      {
+        "from": "via 15",
+        "to": "THE ADIT",
+        "clearance": 2.66,
+        "length": 20.11,
+        "at": {
+          "x": -55.94,
+          "y": -15.73,
+          "z": -15.86
+        }
+      },
+      {
+        "from": "THE ADIT",
+        "to": "via 17",
+        "clearance": 1.52,
+        "length": 6.53,
+        "at": {
+          "x": -53.93,
+          "y": -12.77,
+          "z": -5.72
+        }
+      },
+      {
+        "from": "via 17",
+        "to": "RAVINE ONE",
+        "clearance": 1.58,
+        "length": 6.13,
+        "at": {
+          "x": -53.85,
+          "y": -12.61,
+          "z": -5.38
+        }
+      },
+      {
+        "from": "RAVINE ONE",
+        "to": "via 19",
+        "clearance": 4.26,
+        "length": 7.21,
+        "at": {
+          "x": -50.83,
+          "y": -10.14,
+          "z": 4.96
+        }
+      },
+      {
+        "from": "via 19",
+        "to": "RAVINE TWO",
+        "clearance": 4.23,
+        "length": 9.31,
+        "at": {
+          "x": -48.79,
+          "y": -8.59,
+          "z": 10.56
+        }
+      },
+      {
+        "from": "RAVINE TWO",
+        "to": "via 21",
+        "clearance": 4.19,
+        "length": 4.15,
+        "at": {
+          "x": -46.02,
+          "y": -6.51,
+          "z": 17.84
+        }
+      },
+      {
+        "from": "via 21",
+        "to": "via 22",
+        "clearance": 4.22,
+        "length": 6.78,
+        "at": {
+          "x": -45.49,
+          "y": -6.12,
+          "z": 19.2
+        }
+      },
+      {
+        "from": "via 22",
+        "to": "RAVINE THREE",
+        "clearance": 4.18,
+        "length": 3.65,
+        "at": {
+          "x": -41.69,
+          "y": -3.26,
+          "z": 28.07
+        }
+      },
+      {
+        "from": "RAVINE THREE",
+        "to": "THE ARCH",
+        "clearance": 3.6,
+        "length": 10.28,
+        "at": {
+          "x": -36.63,
+          "y": -0.61,
+          "z": 37.05
+        }
+      },
+      {
+        "from": "THE ARCH",
+        "to": "via 25",
+        "clearance": 2.44,
+        "length": 6.45,
+        "at": {
+          "x": -34.67,
+          "y": 0.79,
+          "z": 39.99
+        }
+      },
+      {
+        "from": "via 25",
+        "to": "via 26",
+        "clearance": 3.38,
+        "length": 6.76,
+        "at": {
+          "x": -33.3,
+          "y": 1.77,
+          "z": 42.04
+        }
+      },
+      {
+        "from": "via 26",
+        "to": "via 27",
+        "clearance": 4.26,
+        "length": 6.9,
+        "at": {
+          "x": -28.48,
+          "y": 4.04,
+          "z": 48.39
+        }
+      },
+      {
+        "from": "via 27",
+        "to": "via 28",
+        "clearance": 4.18,
+        "length": 7.49,
+        "at": {
+          "x": -18,
+          "y": 4.39,
+          "z": 54
+        }
+      },
+      {
+        "from": "via 28",
+        "to": "via 29",
+        "clearance": 3.4,
+        "length": 14.11,
+        "at": {
+          "x": -4,
+          "y": 3.4,
+          "z": 52.5
+        }
+      },
+      {
+        "from": "via 29",
+        "to": "CONTAINER RUN",
+        "clearance": 3.2,
+        "length": 18,
+        "at": {
+          "x": 14,
+          "y": 3.2,
+          "z": 52.5
+        }
+      },
+      {
+        "from": "CONTAINER RUN",
+        "to": "via 31",
+        "clearance": 3.2,
+        "length": 16.04,
+        "at": {
+          "x": 14,
+          "y": 3.2,
+          "z": 52.5
+        }
+      },
+      {
+        "from": "via 31",
+        "to": "via 32",
+        "clearance": 3.16,
+        "length": 12.83,
+        "at": {
+          "x": 30.73,
+          "y": 3.64,
+          "z": 53.77
+        }
+      },
+      {
+        "from": "via 32",
+        "to": "via 33",
+        "clearance": 2.75,
+        "length": 12.66,
+        "at": {
+          "x": 47.63,
+          "y": 4.39,
+          "z": 56.13
+        }
+      },
+      {
+        "from": "via 33",
+        "to": "TANK TURN",
+        "clearance": 3.89,
+        "length": 10.45,
+        "at": {
+          "x": 55.22,
+          "y": 4.76,
+          "z": 49.93
+        }
+      },
+      {
+        "from": "TANK TURN",
+        "to": "via 35",
+        "clearance": 3.23,
+        "length": 9.44,
+        "at": {
+          "x": 52,
+          "y": 4.6,
+          "z": 36
+        }
+      },
+      {
+        "from": "via 35",
+        "to": "PIPE RACK",
+        "clearance": 2.84,
+        "length": 18.12,
+        "at": {
+          "x": 45.74,
+          "y": 4.39,
+          "z": 35.3
+        }
+      },
+      {
+        "from": "PIPE RACK",
+        "to": "via 37",
+        "clearance": 3.35,
+        "length": 8.27,
+        "at": {
+          "x": 34,
+          "y": 4,
+          "z": 34
+        }
+      },
+      {
+        "from": "via 37",
+        "to": "via 38",
+        "clearance": 3,
+        "length": 4.49,
+        "at": {
+          "x": 22,
+          "y": 3,
+          "z": 30
+        }
+      },
+      {
+        "from": "via 38",
+        "to": "START / FINISH",
+        "clearance": 3,
+        "length": 4,
+        "at": {
+          "x": 22,
+          "y": 3,
+          "z": 30
+        }
+      }
+    ],
+    "rings": [
+      {
+        "name": "START / FINISH",
+        "radius": 2.4,
+        "clearance": 0.6
+      },
+      {
+        "name": "SHED IN",
+        "radius": 2.4,
+        "clearance": 0.9
+      },
+      {
+        "name": "SHED OUT",
+        "radius": 2.4,
+        "clearance": 0.9
+      },
+      {
+        "name": "THE BELT",
+        "radius": 2.8,
+        "clearance": 1.2
+      },
+      {
+        "name": "RIM DROP",
+        "radius": 2.8,
+        "clearance": 1.72
+      },
+      {
+        "name": "BENCH ONE",
+        "radius": 2.6,
+        "clearance": 1.47
+      },
+      {
+        "name": "BENCH TWO",
+        "radius": 2.6,
+        "clearance": 1.39
+      },
+      {
+        "name": "BENCH THREE",
+        "radius": 2.6,
+        "clearance": 1.44
+      },
+      {
+        "name": "PIT FLOOR",
+        "radius": 2.8,
+        "clearance": 1.57
+      },
+      {
+        "name": "THE ADIT",
+        "radius": 2.2,
+        "clearance": 0.84
+      },
+      {
+        "name": "RAVINE ONE",
+        "radius": 3,
+        "clearance": 1.32
+      },
+      {
+        "name": "RAVINE TWO",
+        "radius": 3,
+        "clearance": 1.35
+      },
+      {
+        "name": "RAVINE THREE",
+        "radius": 3,
+        "clearance": 1.19
+      },
+      {
+        "name": "THE ARCH",
+        "radius": 3,
+        "clearance": 0.73
+      },
+      {
+        "name": "CONTAINER RUN",
+        "radius": 2.5,
+        "clearance": 0.7
+      },
+      {
+        "name": "TANK TURN",
+        "radius": 2.6,
+        "clearance": 2.4
+      },
+      {
+        "name": "PIPE RACK",
+        "radius": 2.4,
+        "clearance": 0.95
+      }
+    ],
+    "spawns": {
+      "practice": 1,
+      "race": 1,
+      "practiceGround": 0,
+      "raceGround": 0
+    },
+    "worstLeg": {
+      "from": "THE ADIT",
+      "to": "via 17",
+      "clearance": 1.52,
+      "length": 6.53,
+      "at": {
+        "x": -53.93,
+        "y": -12.77,
+        "z": -5.72
+      }
+    },
+    "worstGate": {
+      "name": "START / FINISH",
+      "radius": 2.4,
+      "clearance": 0.6
+    }
+  }
+}

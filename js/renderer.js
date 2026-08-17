@@ -10,6 +10,22 @@ THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
+// Built-in maps, by the id the menu and `tracks.js` use. Anything not named here is treated as a
+// URL, which is what makes a custom uploaded object URL load without a special case.
+const MAPS = {
+    bando: 'bando.glb',
+    quarry: 'rift-quarry.glb'
+};
+
+// Sky and fog per map. This is not decoration: the default 20-100 m fog suits the bando, which is
+// a building you fly around inside, and turns a 300 m quarry into a wall of haze 100 m out - the
+// far side of the pit, the ravine and the basin rim all disappear. Anything not listed, including
+// an uploaded map, gets DEFAULT_ENV, so bando's look is untouched.
+const DEFAULT_ENV = { sky: 0x87ceeb, fogNear: 20, fogFar: 100 };
+const MAP_ENV = {
+    quarry: { sky: 0xc4d3dd, fogNear: 70, fogFar: 460 }
+};
+
 export class Renderer {
     constructor(containerId) {
         this.container = document.getElementById(containerId);
@@ -58,7 +74,9 @@ export class Renderer {
         dirLight.shadow.mapSize.width = 4096;
         dirLight.shadow.mapSize.height = 4096;
         dirLight.shadow.camera.near = 0.5;
-        dirLight.shadow.camera.far = 300;
+        // Far enough to reach the corners of a 300 m map from the light's position: geometry
+        // past this casts no shadow at all, which on the quarry meant the basin walls did not
+        dirLight.shadow.camera.far = 500;
         dirLight.shadow.camera.left = -150;
         dirLight.shadow.camera.right = 150;
         dirLight.shadow.camera.top = 150;
@@ -254,16 +272,26 @@ export class Renderer {
             this.environmentGroup.remove(child); 
         }
 
+        this.applyEnvironment(mapName);
+
         if (mapName === 'placeholder') {
             this.createPlaceholderEnvironment();
-        } else if (mapName === 'bando') {
-            await this.loadEnvironment('bando.glb');
         } else {
-            await this.loadEnvironment(mapName);
+            await this.loadEnvironment(MAPS[mapName] || mapName);
         }
 
         // Generate collision BVH for the loaded map
         await this.generateCollisionBVH();
+    }
+
+    // Sky colour and fog range for the map being loaded, falling back to the original values for
+    // anything without an entry.
+    applyEnvironment(mapName) {
+        const env = MAP_ENV[mapName] || DEFAULT_ENV;
+        this.scene.background.setHex(env.sky);
+        this.scene.fog.color.setHex(env.sky);
+        this.scene.fog.near = env.fogNear;
+        this.scene.fog.far = env.fogFar;
     }
 
     createPlaceholderEnvironment() {
