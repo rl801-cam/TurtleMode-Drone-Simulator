@@ -22,6 +22,9 @@ const MAPS = {
 // far side of the pit, the ravine and the basin rim all disappear. Anything not listed, including
 // an uploaded map, gets DEFAULT_ENV, so bando's look is untouched.
 const DEFAULT_ENV = { sky: 0x87ceeb, fogNear: 20, fogFar: 100 };
+
+// Upper bound on the render scale. See the setPixelRatio call in the constructor.
+const MAX_PIXEL_RATIO = 2;
 const MAP_ENV = {
     quarry: { sky: 0xc4d3dd, fogNear: 70, fogFar: 460 }
 };
@@ -54,7 +57,10 @@ export class Renderer {
             powerPreference: 'high-performance'
         });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.setPixelRatio(window.devicePixelRatio);
+        // Capped at 2. Rendering at the raw device ratio means 9x the pixels of a 1x display on a
+        // 3x panel, which costs more than half the framerate for a difference nobody can see at
+        // this pixel density - and framerate is what a pilot actually feels.
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         this.container.appendChild(this.renderer.domElement);
@@ -254,10 +260,14 @@ export class Renderer {
 
     // Returns the in-flight load for a map that is already loading/loaded, so callers always
     // await a ready collision tree - the drone has nothing else holding it up.
-    loadMap(mapName) {
+    // `onProgress` is optional and receives {phase, loaded, total}: 'download' while the .glb is
+    // coming down, then 'collision' for the BVH build. A map already in flight keeps the callback
+    // it was started with - a second caller joining an in-progress load gets the promise, not a
+    // new progress stream.
+    loadMap(mapName, onProgress) {
         if (this.currentMapName !== mapName) {
             this.currentMapName = mapName;
-            this.mapLoadPromise = this.buildMap(mapName).catch((err) => {
+            this.mapLoadPromise = this.buildMap(mapName, onProgress).catch((err) => {
                 this.currentMapName = null; // let a failed map be retried
                 throw err;
             });
@@ -265,23 +275,75 @@ export class Renderer {
         return this.mapLoadPromise;
     }
 
-    async buildMap(mapName) {
-        // Clear existing map
-        while(this.environmentGroup.children.length > 0) { 
-            const child = this.environmentGroup.children[0];
-            this.environmentGroup.remove(child); 
-        }
+    async buildMap(mapName, onProgress) {
+        // Nothing may be collided against a half-torn-down world. `checkCollision()` and `sweep()`
+        // both answer null while this is false, and physics only steps in PLAYING anyway, but the
+        // flag is cleared here rather than in generateCollisionBVH() so it is false for the whole
+        // window in which the old collider has been freed and the new one does not exist yet.
+        this.collisionReady = false;
+        this.disposeEnvironment();
+        this.disposeCollider();
 
         this.applyEnvironment(mapName);
 
         if (mapName === 'placeholder') {
             this.createPlaceholderEnvironment();
         } else {
-            await this.loadEnvironment(MAPS[mapName] || mapName);
+            await this.loadEnvironment(MAPS[mapName] || mapName, onProgress);
         }
 
         // Generate collision BVH for the loaded map
-        await this.generateCollisionBVH();
+        await this.generateCollisionBVH(onProgress);
+    }
+
+    // Frees the GPU resources held by the previous map.
+    //
+    // Three.js does not reference-count buffers or textures: dropping a mesh out of the scene
+    // graph leaves its VRAM allocated until something calls dispose() on it. The old code only
+    // removed the children, so every map swap through the launch menu stranded a whole map's
+    // worth of GPU memory - and at bando's 43 MB across 848 meshes, a few swaps was enough to
+    // exhaust the context and kill the canvas.
+    //
+    // Materials go through a Set because those 848 meshes share only 8 of them, and traversing
+    // children would otherwise dispose each one hundreds of times. GridHelper and other
+    // non-Mesh objects are covered too - the placeholder map builds one, and it owns buffers
+    // exactly like a mesh does.
+    disposeEnvironment() {
+        const materials = new Set();
+
+        this.environmentGroup.traverse((child) => {
+            if (child.geometry) child.geometry.dispose();
+            const material = child.material;
+            if (Array.isArray(material)) {
+                for (const m of material) materials.add(m);
+            } else if (material) {
+                materials.add(material);
+            }
+        });
+
+        for (const material of materials) {
+            // Every texture a material references is a separate GPU allocation. Scanning the
+            // material's own properties catches map, normalMap, roughnessMap and the rest
+            // without having to keep a list of slot names in step with Three.js.
+            for (const value of Object.values(material)) {
+                if (value && value.isTexture) value.dispose();
+            }
+            material.dispose();
+        }
+
+        this.environmentGroup.clear();
+    }
+
+    // The collider is a second full copy of the map geometry - every mesh merged into one buffer -
+    // with the BVH hanging off it, so leaking it costs about as much again as the map itself.
+    // disposeBoundsTree() is needed on top of dispose(): the tree is a large typed-array structure
+    // that Three.js knows nothing about and will not free on its own.
+    disposeCollider() {
+        if (!this.colliderMesh) return;
+        const geometry = this.colliderMesh.geometry;
+        if (geometry.boundsTree) geometry.disposeBoundsTree();
+        geometry.dispose();
+        this.colliderMesh = null;
     }
 
     // Sky colour and fog range for the map being loaded, falling back to the original values for
@@ -330,7 +392,16 @@ export class Renderer {
         }
     }
 
-    loadEnvironment(url) {
+    // The third argument to loader.load() used to be `undefined`, so a 43 MB map downloaded with
+    // no feedback at all and the launch button sat on a frozen "Loading Map..." for the whole of
+    // it. GLTFLoader forwards the XHR's ProgressEvent, which is passed on unformatted - what to
+    // print is the UI's business, not the renderer's.
+    //
+    // Note the byte counts cannot be trusted to agree. GitHub Pages serves the .glb gzipped, and
+    // browsers differ over whether `loaded` counts compressed or decompressed bytes while `total`
+    // comes from Content-Length either way, so the ratio can exceed 1 or `lengthComputable` can
+    // be false outright. The formatter downstream handles both.
+    loadEnvironment(url, onProgress) {
         return new Promise((resolve, reject) => {
             const loader = new GLTFLoader();
             loader.load(url, (gltf) => {
@@ -344,7 +415,14 @@ export class Renderer {
                 });
                 this.environmentGroup.add(model);
                 resolve();
-            }, undefined, (error) => {
+            }, (event) => {
+                if (!onProgress) return;
+                onProgress({
+                    phase: 'download',
+                    loaded: event.loaded || 0,
+                    total: event.lengthComputable ? event.total : 0
+                });
+            }, (error) => {
                 console.error(error);
                 reject(error);
             });
@@ -366,8 +444,17 @@ export class Renderer {
     // Measured on `bando.glb` — 852 meshes, 868k triangles — the whole pipeline is about 490 ms,
     // of which the tree itself is about 260 ms: one long frame while the menu is still up, next to
     // a 45 MB download. There is no headroom here worth a second failure mode.
-    generateCollisionBVH() {
+    async generateCollisionBVH(onProgress) {
         this.collisionReady = false;
+
+        if (onProgress) {
+            onProgress({ phase: 'collision', loaded: 0, total: 0 });
+            // The build below blocks the main thread for a few hundred milliseconds, so without
+            // giving the browser a chance to paint first the message above would never appear -
+            // it would be overwritten by the time the frame after it was drawn. Two frames: the
+            // first lets the style change be committed, the second guarantees it reached glass.
+            await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        }
 
         // 1. Gather all collidable geometries
         const geometries = [];
@@ -388,7 +475,7 @@ export class Renderer {
         if (geometries.length === 0) {
             this.colliderMesh = null;
             this.collisionReady = true;
-            return Promise.resolve();
+            return;
         }
         
         // 2. Merge geometries into a single geometry
@@ -404,7 +491,6 @@ export class Renderer {
         this.colliderMesh = new THREE.Mesh(mergedGeom);
         this.collisionReady = true;
         console.log(`Collision BVH built in ${Math.round(performance.now() - t0)} ms.`);
-        return Promise.resolve();
     }
 
     // Sweeps a ray along the path the drone travelled during one physics sub-step. At racing
@@ -479,6 +565,9 @@ export class Renderer {
     onWindowResize() {
         this.camera.aspect = window.innerWidth / window.innerHeight;
         this.camera.updateProjectionMatrix();
+        // Reapplied here as well: dragging the window to a monitor with a different pixel density
+        // changes devicePixelRatio, and without this the canvas would keep the old scale.
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
         this.renderer.setSize(window.innerWidth, window.innerHeight);
     }
 

@@ -4,16 +4,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TurtleMode Simulator</title>
-    <link rel="stylesheet" href="css/style.css?v=27">
-    <!-- Import maps for ES modules to load Three.js and Cannon-es cleanly -->
+    <link rel="stylesheet" href="css/style.css?v=28">
+    <!-- Import maps for ES modules. These resolve to vendored copies under vendor/, not to a CDN:
+         the sim has to work offline and must not go dark when unpkg does. Versions are pinned by
+         what is committed there, so bumping a dependency means replacing the file (see
+         tools/vendor-deps.mjs) rather than editing a URL here. -->
     <script type="importmap">
         {
             "imports": {
-                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
-                "cannon-es": "https://unpkg.com/cannon-es@0.20.0/dist/cannon-es.js",
-                "three-mesh-bvh": "https://unpkg.com/three-mesh-bvh@0.7.3/build/index.module.js",
-                "three-mesh-bvh/": "https://unpkg.com/three-mesh-bvh@0.7.3/"
+                "three": "./vendor/three/three.module.js",
+                "three/addons/": "./vendor/three/addons/",
+                "cannon-es": "./vendor/cannon-es/cannon-es.js",
+                "three-mesh-bvh": "./vendor/three-mesh-bvh/index.module.js"
             }
         }
     </script>
@@ -295,6 +297,6 @@
         </div>
     </div>
 
-    <script type="module" src="js/main.js?v=27"></script>
+    <script type="module" src="js/main.js?v=28"></script>
 </body>
 </html>

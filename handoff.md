@@ -14,7 +14,10 @@ the airframe to a fixed spec and times laps round a gated course, with a persist
 
 ### Tech Stack
 * **Core:** Vanilla HTML, CSS, JavaScript (ES modules). No bundler, no `npm install` — dependencies
-  arrive via an `<importmap>` from unpkg.
+  are **committed under `vendor/`** and resolved by the `<importmap>` in `index.html`. They used to
+  be fetched from unpkg, which meant the simulator could not run offline and went dark whenever
+  unpkg did. Refresh them with `node tools/vendor-deps.mjs --force`; the pinned versions live in
+  that script.
 * **Rendering:** Three.js `0.160.0`
 * **Physics:** Cannon-es `0.20.0` — integration only; contacts are custom (see below)
 * **Collision geometry:** three-mesh-bvh `0.7.3`
@@ -27,6 +30,8 @@ the airframe to a fixed spec and times laps round a gated course, with a persist
 ## Architecture & File Structure
 
 * **`index.html`** — entry point. UI overlays (launch menu, pause menu, OSD) and the importmap.
+* **`vendor/`** — the committed browser dependencies the importmap points at. Not hand-edited;
+  written by `tools/vendor-deps.mjs`.
 * **`css/style.css`** — glass-panel UI, flexbox layouts, OSD.
 * **`js/main.js`** — central controller. `requestAnimationFrame` loop, game state
   (`MENU` / `PLAYING` / `PAUSED`), module wiring, and the collision callbacks handed to physics.
@@ -41,7 +46,9 @@ the airframe to a fixed spec and times laps round a gated course, with a persist
 * **`js/race.js`** — gate meshes, crossing detection, the lap clock, and the `localStorage`
   leaderboard.
 * **`js/tracks.js`** — course data (gate positions, radii, spawn) and the fixed racing spec.
-* **`tools/`** — offline map generation. `generate-rift-quarry.mjs` builds `rift-quarry.glb` and
+* **`tools/`** — offline map generation, plus two maintenance scripts: `bump-version.mjs` advances
+  the cache-busting tags (see *Caching*) and `vendor-deps.mjs` refreshes `vendor/`.
+  `generate-rift-quarry.mjs` builds `rift-quarry.glb` and
   the survey the *Rift Run* gates come from; `inspect-glb.mjs` reads any `.glb` back; `lib/` holds
   the glTF writer, the noise, the procedural textures, the clearance checker and a software
   rasteriser for previews. Nothing here is loaded by the page.
@@ -285,18 +292,47 @@ Each of these was found the hard way. They are load-bearing.
 26. **Nothing scattered may land in the racing corridor.** Boulders, spoil heaps, light masts and
     the rim berm are all filtered against the racing line before placement. The line is built first
     for that reason, and `LINE_XZ` has to be set before any of them run.
+27. **Every map swap must dispose the map it replaces.** Three.js does not reference-count GPU
+    resources: removing a mesh from the scene graph leaves its buffers and textures allocated until
+    something calls `dispose()`. `buildMap()` used only to detach the children, so each swap through
+    the launch menu stranded an entire map's worth of VRAM — at bando's 43.6 MB over 848 meshes, a
+    few swaps was enough to lose the WebGL context. `disposeEnvironment()` and `disposeCollider()`
+    now run before anything new is built. The collider matters as much as the scene: it is a second
+    full copy of the geometry merged into one buffer, and its BVH is a large typed-array structure
+    that `geometry.dispose()` does not touch — `disposeBoundsTree()` is a separate call.
+28. **Anything that binds a key must check whether the user is typing.** `input.js`'s keyboard
+    fallback had no such guard, so entering a pilot name flew the drone: the W, A, S and D in a name
+    drove throttle and yaw and the space bar toggled the arm switch. Both `main.js` and `input.js`
+    now bail out when `document.activeElement` is a form control.
+29. **The arrow keys belong to the camera.** Uptilt on ↑/↓ is documented in the launch menu *and*
+    the OSD. The keyboard flight fallback used to bind the same keys to pitch and roll, so an arrow
+    press did both at once; pitch and roll are on **I/K** and **J/L** now. Anything new wanting the
+    arrows has to take them from the camera first, and update both strings in `index.html`.
 
 ## Caching — read this before debugging "my change did nothing"
 
 `index.html` and the imports in `main.js` carry a `?v=N` tag, and the build is logged to the
 console and shown under the Start button. **`index.html` itself is not versioned**, so a browser
 holding a stale copy keeps requesting the old module versions and none of the tags help. If the
-build stamp does not match, hard-reload (`Ctrl+Shift+R`) before investigating anything else. Bump
-every tag and `BUILD` together after editing any module.
+build stamp does not match, hard-reload (`Ctrl+Shift+R`) before investigating anything else.
 
-**Current build: `v27`** — the tags live in `index.html` (stylesheet and the `main.js` script), the
+**Do not bump the tags by hand.** There are twelve of them across three files and they must all
+read the same number; missing one produces the worst failure this project has — a page running a
+mixture of old and new modules, which looks exactly like a bug in whatever you just changed.
+
+```bash
+node tools/bump-version.mjs           # advance to the next version
+node tools/bump-version.mjs 42        # set an explicit version
+node tools/bump-version.mjs --check   # print the current version, or exit 1 if files disagree
+```
+
+**Current build: `v28`** — the tags live in `index.html` (stylesheet and the `main.js` script), the
 import list at the top of `main.js`, the `tracks.js` import in `ui.js`, and the `BUILD` constant in
-`main.js`. All of them must read the same number.
+`main.js`. `--check` exits non-zero if they have drifted apart, which is worth running before
+committing.
+
+`vendor/` is deliberately **not** versioned this way. Those files change only when a dependency is
+deliberately updated, and their URLs change with it.
 
 ## Key Milestones & Solved Problems
 
@@ -337,6 +373,25 @@ import list at the top of `main.js`, the `tracks.js` import in `ui.js`, and the 
     the yard under a natural arch. The course on it, **Rift Run**, is 17 gates and about 422 m a lap.
     Both come out of `tools/generate-rift-quarry.mjs` (see *The generated map*), which is also the
     first thing in this project that verifies a course automatically rather than by flying it.
+15. **Dependencies vendored, and the version bump automated.** `vendor/` now holds the five files
+    the importmap resolves — three.js `r160`, its `GLTFLoader` and `BufferGeometryUtils` addons,
+    cannon-es and three-mesh-bvh — so the sim runs offline and no longer depends on unpkg being up.
+    The import graph closes on itself; adding a new addon means vendoring whatever it imports too,
+    or the page dies on a bare specifier the importmap cannot resolve. Alongside it,
+    `tools/bump-version.mjs` replaced the twelve-tags-by-hand ritual.
+16. **Map disposal, frame pacing, render scale and load feedback.** Four independent defects, all
+    fixed together (see invariant 27 and *Caching*):
+    * Map swaps leaked every previous map's GPU memory.
+    * The FPS limiter compared elapsed time against a whole frame interval, which discards any
+      frame arriving fractionally early — with the cap set to the monitor's own refresh rate, vsync
+      jitter tripped that test roughly every other frame and a 60 fps cap ran at **30**. It now
+      tracks a deadline and allows half a *display* frame of slack, measured live.
+    * `setPixelRatio()` took the raw device ratio, so a 3× panel rendered nine times the pixels of
+      a 1× one. Capped at 2.
+    * `GLTFLoader`'s `onProgress` argument was `undefined`, so tens of megabytes downloaded with no
+      feedback whatsoever. The Start button now shows a percentage, then `Building Collision...`
+      during the BVH build — which needs two `requestAnimationFrame`s before it, or the message
+      never reaches the glass ahead of the blocking work it is announcing.
 
 ## Verification
 
@@ -362,6 +417,21 @@ arithmetic would need the same lift-the-method-out treatment as `renderer.js` �
 gate detection is pure geometry and exactly the kind of thing that is silently wrong.
 
 Committing these under `tests/` remains the single cheapest way to protect the invariants above.
+
+**Checking map disposal (invariant 27).** GPU leaks are invisible to source review, so this one is
+measured rather than argued. `WebGLRenderer.info.memory.geometries` only ever decrements on an
+explicit `dispose()`, so loading maps in turn and reading the count after each is a direct test:
+serve the project, drive `renderer.loadMap()` from a page that iframes `index.html` (the running sim
+is on `window.simulator` for exactly this reason), and watch the counter across a swap. Fixed, it
+returns to the same number for the same map; leaking, it can only climb:
+
+```
+placeholder=22  ->  bando=852  ->  quarry=137  ->  bando=852     clean
+placeholder=22  ->  bando=874  ->  quarry=1011 ->  bando=1863    leaking
+```
+
+The same page verifies the load-progress callback, which reports `download` then `collision` for
+each map. This harness is not committed either.
 
 The map generator is the exception: its checks *are* committed and run every time it builds.
 `selfTest()` asserts that boxes, cylinders and tubes come out facing outwards, `verifyArch()` that
@@ -396,8 +466,17 @@ gap that matters most.
    future wrong-way detection would have to work off the drone's progress round the course instead.
    The board is per-browser `localStorage`, so "track record" means this browser's record.
 10. **Map download size and draw load.** `rift-quarry.glb` is 49.6 MB against bando's 43.6 MB, and
-    like bando it is uncompressed — Draco or meshopt would move both, and both need a build step
-    and a decoder. Two things about the quarry are worth knowing: 23.8 MB of it is embedded PNG,
+    both are uncompressed on disk — but **that is not what goes over the wire**. GitHub Pages
+    gzips them at the edge, measured at 43.6 MB → 7.5 MB for bando (`Content-Encoding: gzip`,
+    `Content-Length: 7472165`). These files are mostly float32 vertex attributes and compress
+    extremely well, so transfer size is already close to what Draco or meshopt would achieve, and
+    neither is worth a build step and a decoder for the download alone. Note the compression is the
+    *host's* doing and cannot be configured from the repo; a different host may not do it.
+
+    **Draw load is now the bigger problem, and it is untouched.** bando is 848 meshes sharing 8
+    materials — roughly 852 draw calls a frame, and again for the shadow map — which merging by
+    material would cut to 8. That, not file size, is the next real win on these maps. Two things
+    about the quarry are worth knowing: 23.8 MB of it is embedded PNG,
     which is the single easiest thing to trade away (the sizes are one line at the top of the
     generator), and the terrain is split into 8×8 tiles per material specifically so Three.js can
     frustum-cull it. Left as one sheet the ground was submitted whole every frame, and again for

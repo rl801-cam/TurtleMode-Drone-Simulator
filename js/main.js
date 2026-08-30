@@ -1,21 +1,26 @@
 // main.js - Entry point for the application
 
 // The ?v= tags are cache busters, matching the one on style.css. Browsers cache ES modules
-// aggressively, so without them an edited module can keep running from cache against fresh
-// HTML. Bump every one of these (and the two in index.html) together after changing any file.
-import { Renderer } from './renderer.js?v=27';
-import { PhysicsEngine } from './physics.js?v=27';
-import { InputHandler } from './input.js?v=27';
-import { UIHandler } from './ui.js?v=27';
-import { AudioEngine } from './audio.js?v=27';
-import { VideoDelay } from './latency.js?v=27';
-import { RaceManager } from './race.js?v=27';
-import { RACE_SPEC, formatTime } from './tracks.js?v=27';
+// aggressively, so without them an edited module can keep running from cache against fresh HTML.
+// Every tag here, the two in index.html, the one in ui.js and the BUILD constant below must read
+// the same number - a page running a mixture of old and new modules looks exactly like a bug in
+// whatever you just changed. Do not edit them by hand:
+//
+//   node tools/bump-version.mjs           advance to the next version
+//   node tools/bump-version.mjs --check   verify they have not drifted apart
+import { Renderer } from './renderer.js?v=28';
+import { PhysicsEngine } from './physics.js?v=28';
+import { InputHandler } from './input.js?v=28';
+import { UIHandler } from './ui.js?v=28';
+import { AudioEngine } from './audio.js?v=28';
+import { VideoDelay } from './latency.js?v=28';
+import { RaceManager } from './race.js?v=28';
+import { RACE_SPEC, formatTime } from './tracks.js?v=28';
 
 // Shown in the launch menu and logged on boot. index.html itself carries no cache buster, so a
 // browser holding a stale copy of it will keep loading the old ?v= modules and none of the tags
 // above will help. If this does not match the newest version, the page needs a hard reload.
-const BUILD = 'v27';
+const BUILD = 'v28';
 
 class Simulator {
     constructor() {
@@ -39,7 +44,7 @@ class Simulator {
             this.input,
             this.renderer,
             this.race,
-            (mapChoice, mode, track) => this.start(mapChoice, mode, track),
+            (mapChoice, mode, track, onProgress) => this.start(mapChoice, mode, track, onProgress),
             () => this.resume(),
             () => this.reset(),
             () => this.exit()
@@ -53,9 +58,12 @@ class Simulator {
         this.frames = 0;
         this.lastFpsTime = performance.now();
 
-        // FPS Limiter
+        // FPS Limiter. See the pacing block in animate() for what these two track.
         this.fpsLimitEnabled = false;
         this.fpsLimit = 60;
+        this._nextFrameDue = 0;
+        this._lastRawFrame = performance.now();
+        this._displayInterval = 1000 / 60; // running estimate of the monitor's refresh interval
         
         const fpsToggle = document.getElementById('fps-limit-toggle');
         const fpsValue = document.getElementById('fps-limit-value');
@@ -127,7 +135,7 @@ class Simulator {
         this.animate();
     }
 
-    async start(mapChoice, mode = 'practice', track = null) {
+    async start(mapChoice, mode = 'practice', track = null, onProgress = null) {
         // Runs synchronously inside the Start button's click handler, which is the user gesture
         // the browser requires before it will let an AudioContext produce sound.
         this.audio.start();
@@ -158,7 +166,7 @@ class Simulator {
         // clock first left the drone free-falling through an empty world for the whole of a 45 MB
         // download, and the race began somewhere under the map. It also means a map that fails to
         // load leaves us in MENU, where the caller's error path can be seen.
-        await this.renderer.loadMap(mapChoice);
+        await this.renderer.loadMap(mapChoice, onProgress);
 
         if (this.mode === 'race') {
             this.race.setTrack(track);
@@ -256,13 +264,33 @@ class Simulator {
         requestAnimationFrame(() => this.animate());
 
         const now = performance.now();
-        
-        // Enforce FPS Limit
+
+        // Running estimate of how often the browser is actually calling us, which is the display's
+        // refresh interval. Outliers (a stall, or the tab coming back from hidden) are ignored so
+        // one bad frame cannot drag the estimate off.
+        const rawDelta = now - this._lastRawFrame;
+        this._lastRawFrame = now;
+        if (rawDelta > 0 && rawDelta < 100) {
+            this._displayInterval += (rawDelta - this._displayInterval) * 0.1;
+        }
+
+        // Enforce FPS Limit.
+        //
+        // This used to ask whether a full frame interval had elapsed since the last rendered
+        // frame, which throws away any frame arriving even fractionally early. When the limit
+        // matches the refresh rate the two clocks beat against each other and ordinary vsync
+        // jitter trips that test about half the time - so a 60 fps cap on a 60 Hz monitor ran at
+        // 30. Track a deadline instead, and let a frame through if it is within half a *display*
+        // frame of it: at a matched refresh nothing is ever dropped, and on a 144 Hz panel the
+        // slack is small enough that the cadence still averages out to the requested rate.
         if (this.fpsLimitEnabled && this.fpsLimit > 0) {
-            const minFrameTime = 1000 / this.fpsLimit;
-            if (now - this.lastTime < minFrameTime) {
-                return; // Skip rendering this frame
-            }
+            const interval = 1000 / this.fpsLimit;
+            const slack = Math.min(interval, this._displayInterval) * 0.5;
+            if (now < this._nextFrameDue - slack) return; // Skip rendering this frame
+            // Advance by whole intervals so the cadence stays on its grid rather than drifting
+            // with each frame's jitter, but resynchronise if the deadline has fallen behind.
+            this._nextFrameDue += interval;
+            if (this._nextFrameDue < now) this._nextFrameDue = now + interval;
         }
 
         const dt = (now - this.lastTime) / 1000;

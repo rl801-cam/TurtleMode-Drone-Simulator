@@ -1,6 +1,6 @@
 // ui.js - Handles DOM interactions and Menus
 
-import { TRACKS, DEFAULT_TRACK, formatTime } from './tracks.js?v=27';
+import { TRACKS, DEFAULT_TRACK, formatTime } from './tracks.js?v=28';
 
 export class UIHandler {
     constructor(physicsEngine, inputHandler, renderer, race, startCallback, resumeCallback, resetCallback, exitCallback) {
@@ -266,6 +266,29 @@ export class UIHandler {
 
     // Arrow keys in flight. Meaningless in Line of Sight - there is no onboard camera to tilt -
     // so it is ignored there rather than changing something the pilot cannot see.
+    // Progress line for the Start button while a map loads, from Renderer.loadMap(). The maps are
+    // tens of megabytes and the collision build blocks for a few hundred milliseconds on top, so
+    // the button previously froze on "Loading Map..." for long enough to look hung.
+    //
+    // Percentages are only shown when the byte counts are actually usable. A gzipped .glb often
+    // reports decompressed `loaded` against a compressed `total`, which sails past 100%, so the
+    // ratio is sanity-checked and a plain megabyte count is the fallback.
+    setLoadProgress(progress) {
+        this.elements.btnStart.textContent = this.formatLoadProgress(progress);
+    }
+
+    formatLoadProgress({ phase, loaded, total }) {
+        if (phase === 'collision') return 'Building Collision...';
+
+        if (total > 0 && loaded <= total) {
+            return `Loading Map... ${Math.round((loaded / total) * 100)}%`;
+        }
+        if (loaded > 0) {
+            return `Loading Map... ${(loaded / (1024 * 1024)).toFixed(1)} MB`;
+        }
+        return 'Loading Map...';
+    }
+
     adjustFpvUptilt(delta) {
         if (this.cameraMode !== 'fpv') return;
         this.setFpvUptilt(this.fpvUptilt + delta, true);
@@ -305,7 +328,7 @@ export class UIHandler {
             this.elements.btnStart.disabled = true;
 
             try {
-                await this.startCallback(mapChoice, this.mode, track);
+                await this.startCallback(mapChoice, this.mode, track, (p) => this.setLoadProgress(p));
 
                 this.hideMenu(this.elements.launchMenu);
                 this.elements.osd.classList.remove('hidden');

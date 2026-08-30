@@ -14,7 +14,7 @@ hosted on GitHub Pages. Two modes: **Practice**, free flight with every paramete
 | Collision geometry | three-mesh-bvh `0.7.3` |
 | Audio | Web Audio API (synthesised, no sample files) |
 | Input | Gamepad API |
-| Modules | Vanilla ES modules via `<importmap>` from unpkg — no bundler, no `npm install` |
+| Modules | Vanilla ES modules via `<importmap>`, resolved to committed copies in `vendor/` — no bundler, no `npm install` |
 | Map tools | Plain Node under `tools/`, zero dependencies — glTF, PNG and previews written by hand |
 | Hosting | GitHub Pages |
 
@@ -33,14 +33,21 @@ hosted on GitHub Pages. Two modes: **Practice**, free flight with every paramete
 | `js/latency.js` | Artificial video-link delay |
 | `js/race.js` | Gate meshes, crossing detection, lap clock, persistent leaderboard |
 | `js/tracks.js` | Course data (gates, radii, spawn) and the fixed racing spec |
-| `tools/` | Offline map generation and inspection. Not loaded by the page |
+| `vendor/` | Committed browser dependencies the importmap points at. Written by `tools/vendor-deps.mjs` |
+| `tools/` | Offline map generation and inspection, plus `bump-version.mjs` and `vendor-deps.mjs`. Not loaded by the page |
 
 **Module caching:** `index.html` and the imports in `main.js` and `ui.js` carry a `?v=N`
 cache-busting tag, and the running build is logged to the console and shown in the launch menu.
-Bump every tag and the `BUILD` constant together after editing any module — **the current build is
-`v27`**. `index.html` itself is not versioned, so a browser holding a stale copy of it will keep
-requesting the old module versions — check the build stamp before debugging anything that looks
+All twelve tags and the `BUILD` constant must agree, so they are bumped by tool rather than by hand
+— `node tools/bump-version.mjs`, with `--check` to verify they have not drifted. **The current
+build is `v28`.** `index.html` itself is not versioned, so a browser holding a stale copy of it will
+keep requesting the old module versions — check the build stamp before debugging anything that looks
 like an unapplied change.
+
+**Dependencies:** the importmap resolves to `vendor/`, not to a CDN. Fetching three.js from unpkg
+meant the simulator could not run offline and went dark whenever unpkg did. `node
+tools/vendor-deps.mjs --force` refreshes the five vendored files; the pinned versions live in that
+script and are the same fact as the table above.
 
 ## 3. Implemented Features
 
@@ -50,6 +57,11 @@ like an unapplied change.
   visualiser and axis bars for verification.
 - Configurable arm button; a disarmed drone receives no thrust and makes no sound.
 - 5% deadband, rescaled so the usable stick range stays full.
+- Keyboard fallback for testing without a radio: `W`/`S` throttle, `A`/`D` yaw, `I`/`K` pitch,
+  `J`/`L` roll, space to arm. Pitch and roll are deliberately *not* on the arrow keys — those are
+  the documented in-flight camera uptilt control, and sharing them meant one press did both. The
+  fallback is suppressed while a form control has focus, so typing a pilot name no longer flies the
+  drone.
 
 ### 3.2 Flight Model
 - Fixed 120 Hz physics sub-step. Thrust and control torque are injected through Cannon-es's
@@ -91,13 +103,20 @@ impulse solver rather than Cannon-es's narrowphase:
   spiralling 22 m down to the pit floor, an adit bored through a rock plug, and a 93 m ravine
   climbing back to the yard beneath a natural stone arch. 49.6 MB, 762k triangles, 139 meshes,
   seven embedded procedural textures. Built by `tools/generate-rift-quarry.mjs` (§4).
-- **Load cost.** `bando.glb` is 43.6 MB — 852 meshes, 868k triangles, uncompressed, no textures;
-  `rift-quarry.glb` is 49.6 MB, of which 23.8 MB is texture. Everything after the download is cheap
-  by comparison: measured end to end on the bando, GLTF parse, clone and transform, merge and BVH
-  come to about 490 ms, of which the tree is about 260 ms. So the wait on a first visit is very
-  nearly all transfer, and on later visits the browser cache makes it disappear. Draco or meshopt
-  compression is the one change that would move it; both need a build step and a decoder, so
-  neither is in yet.
+- **Load cost.** `bando.glb` is 43.6 MB on disk — 852 meshes, 868k triangles, no textures;
+  `rift-quarry.glb` is 49.6 MB, of which 23.8 MB is texture. **Over the wire they are far smaller:**
+  GitHub Pages gzips them at the edge, measured at 7.5 MB for bando. They are mostly float32 vertex
+  data and compress about six-fold, so transfer is already near what Draco or meshopt would buy and
+  neither is worth a build step and a decoder. Everything after the download is cheap by comparison:
+  measured end to end on the bando, GLTF parse, clone and transform, merge and BVH come to about
+  490 ms, of which the tree is about 260 ms.
+- **Load progress** is reported to the Start button — a percentage while the map downloads, then
+  `Building Collision...` for the BVH build. Before this the button sat frozen on "Loading Map..."
+  for the whole transfer.
+- **Maps are fully disposed when swapped.** Three.js does not free GPU buffers or textures when a
+  mesh leaves the scene graph, so every swap used to strand a map's worth of VRAM — enough, after a
+  few, to lose the WebGL context. Both the scene and the merged collider (plus its BVH) are released
+  before the next map is built.
 
 ### 3.5 Cameras
 - **FPV** — 90° FOV, mounted on the airframe.
@@ -214,6 +233,12 @@ viewpoint to the start grid, and locks the airframe to a fixed spec.
 - **OSD:** arm state, throttle, optional speed, LOS distance, and the race HUD.
 - Fullscreen, FPS counter, `R` to reset (back to the grid in a race, which discards the lap in
   progress), `Escape` to pause.
+- **FPS limiter** paces against a deadline with half a display-frame of slack, rather than
+  demanding a full interval since the last frame. The old test discarded any frame arriving
+  fractionally early, so capping at the monitor's own refresh rate halved it — 60 on a 60 Hz panel
+  ran at 30.
+- **Render scale is capped at 2× device pixel ratio.** A 3× panel was rendering nine times the
+  pixels of a 1× one, for a difference invisible at that density and well over half the framerate.
 
 ### 3.10 Default Configuration
 Mass `0.5 kg` · Max thrust `25 N` (~5:1 TWR, hover near 20% throttle) · Air drag `0.5` ·
@@ -304,6 +329,9 @@ against those exact triangles.
 - Two-sided gates: a checkpoint is taken from whichever side the drone reaches it.
 - **A second map and a second track**, both generated — Rift Quarry and Rift Run — along with the
   toolchain that builds and verifies them, and per-map sky and fog.
+- **Dependencies vendored under `vendor/`** — the sim runs offline and no longer depends on unpkg.
+- **Version bumping automated** — `tools/bump-version.mjs` keeps all twelve cache tags in step.
+- Map disposal on swap, frame-pacing fix, capped render scale, and map load progress.
 
 ### Next
 1. **Persistent settings.** Camera, audio, mode, track, pilot name and the leaderboards persist;
@@ -326,3 +354,7 @@ against those exact triangles.
 7. **Angle / horizon mode.** Acro only at present; a self-levelling mode makes day one possible.
 8. **Doppler and propagation delay.** Distance attenuation is in; a delay line whose length
    tracks range would add both the travel delay and Doppler shift on a fast flyby.
+9. **Draw call load on the large maps.** bando submits 848 meshes sharing only 8 materials — about
+   852 draw calls a frame, and again for the shadow map. Merging by material offline would cut that
+   to 8. With transfer size already handled by edge gzip (§3.4), this is the biggest remaining
+   rendering win on both maps; there is still no LOD and no occlusion culling.
