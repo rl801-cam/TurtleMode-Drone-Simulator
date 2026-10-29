@@ -97,7 +97,7 @@ export class Renderer {
         this.scene.add(this.droneMesh);
 
         // Attach Camera to Drone (slightly forward/up for FPV view)
-        this.cameraOffset = new THREE.Vector3(0, 0.05, -0.13); // Local offset
+        this.cameraOffset = new THREE.Vector3(0, 0.04, -0.13); // Local offset
         this.droneMesh.add(this.camera);
         this.camera.position.copy(this.cameraOffset);
         this.applyFpvUptilt();
