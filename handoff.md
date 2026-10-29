@@ -326,7 +326,7 @@ node tools/bump-version.mjs 42        # set an explicit version
 node tools/bump-version.mjs --check   # print the current version, or exit 1 if files disagree
 ```
 
-**Current build: `v28`** — the tags live in `index.html` (stylesheet and the `main.js` script), the
+**Current build: `v30`** — the tags live in `index.html` (stylesheet and the `main.js` script), the
 import list at the top of `main.js`, the `tracks.js` import in `ui.js`, and the `BUILD` constant in
 `main.js`. `--check` exits non-zero if they have drifted apart, which is worth running before
 committing.

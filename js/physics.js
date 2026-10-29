@@ -63,11 +63,11 @@ export class PhysicsEngine {
         // Offsetting them vertically gives every head-on wall strike a lever arm about the CoM,
         // which makes the drone tumble backwards off flat walls it should bounce squarely off.
         this.contactPoints = [
-            { offset: new CANNON.Vec3(-0.09, 0, -0.09), radius: 0.05 },
-            { offset: new CANNON.Vec3(0.09, 0, -0.09), radius: 0.05 },
-            { offset: new CANNON.Vec3(-0.09, 0, 0.09), radius: 0.05 },
-            { offset: new CANNON.Vec3(0.09, 0, 0.09), radius: 0.05 },
-            { offset: new CANNON.Vec3(0, 0, 0), radius: 0.05 }
+            { offset: new CANNON.Vec3(-0.09, 0, -0.09), radius: 0.06 },
+            { offset: new CANNON.Vec3(0.09, 0, -0.09), radius: 0.06 },
+            { offset: new CANNON.Vec3(-0.09, 0, 0.09), radius: 0.06 },
+            { offset: new CANNON.Vec3(0.09, 0, 0.09), radius: 0.06 },
+            { offset: new CANNON.Vec3(0, 0, 0), radius: 0.06 }
         ];
         // One cheap query around the whole airframe; skips the per-point work when nothing is close
         this.broadPhaseRadius = 0.25;

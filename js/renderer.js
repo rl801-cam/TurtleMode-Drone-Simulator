@@ -91,13 +91,16 @@ export class Renderer {
         dirLight.shadow.normalBias = 0.02;
         this.scene.add(dirLight);
 
+        // FPV camera mount, in drone-local space (slightly forward/up). Set before the model is
+        // built, since the model's camera pod is placed on it.
+        this.cameraOffset = new THREE.Vector3(0, 0.03, -0.13);
+
         // Drone Mesh (Visual rep of the collision box, only shown in Line of Sight mode)
         this.droneMesh = this.createDroneModel();
         this.droneMesh.visible = false; // Make invisible for FPV
         this.scene.add(this.droneMesh);
 
-        // Attach Camera to Drone (slightly forward/up for FPV view)
-        this.cameraOffset = new THREE.Vector3(0, 0.04, -0.13); // Local offset
+        // Attach Camera to Drone
         this.droneMesh.add(this.camera);
         this.camera.position.copy(this.cameraOffset);
         this.applyFpvUptilt();
@@ -144,28 +147,86 @@ export class Renderer {
     }
 
     createDroneModel() {
-        // A small quad sized to roughly match the physics box (0.3m span).
+        // A small freestyle quad laid out on the physics contact points: motors at (±0.09, ±0.09)
+        // and everything kept inside the contact spheres (radius 0.06, centred on the CoM plane).
+        // The TPU feet under the motors reach the bottom of the spheres and the antenna stops just
+        // short of the top, so the model sits on the ground the right way up and upside down.
         // Front props are red and rear props white so orientation stays readable from a distance.
         // fog is disabled on the drone so it doesn't fade into the sky when flown far away in LOS.
         const group = new THREE.Group();
 
-        // The airframe hangs 0.02 below the origin so its underside lines up with the bottom of
-        // the physics contact spheres (radius 0.05, centred on the CoM plane) and it looks like
-        // it is sitting on the ground rather than hovering over it.
-        const frame = new THREE.Group();
-        frame.position.y = -0.02;
-        group.add(frame);
+        const mat = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.6, fog: false, ...extra });
+        const carbonMat = mat(0x1a1a1a, { roughness: 0.45, metalness: 0.2 });
+        const tpuMat = mat(0xff7a1a, { roughness: 0.8 });
+        const motorMat = mat(0x8a8f98, { roughness: 0.35, metalness: 0.5 });
+        const standoffMat = mat(0x6b7280, { roughness: 0.4, metalness: 0.5 });
+        const pcbMat = mat(0x14532d, { roughness: 0.7 });
+        const batteryMat = mat(0x30343b, { roughness: 0.7 });
+        const labelMat = mat(0xf5c518, { roughness: 0.5 });
+        const strapMat = mat(0xd62828, { roughness: 0.8 });
+        const lensMat = mat(0x0b1a33, { roughness: 0.1, metalness: 0.6, emissive: 0x0a2a55 });
+        const ledMat = mat(0x33ddff, { emissive: 0x33ddff, emissiveIntensity: 1.5 });
+        const frontMat = mat(0xff3322, { emissive: 0x551108, roughness: 0.5 });
+        const rearMat = mat(0xf0f0f0, { roughness: 0.5 });
 
-        const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.6, fog: false });
-        const frontMat = new THREE.MeshStandardMaterial({ color: 0xff3322, emissive: 0x551108, roughness: 0.5, fog: false });
-        const rearMat = new THREE.MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.5, fog: false });
+        const add = (geometry, material, x, y, z, parent = group) => {
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.position.set(x, y, z);
+            mesh.castShadow = true;
+            parent.add(mesh);
+            return mesh;
+        };
 
-        const body = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.06, 0.2), bodyMat);
-        body.castShadow = true;
-        frame.add(body);
+        // Bottom plate
+        add(new THREE.BoxGeometry(0.05, 0.006, 0.2), carbonMat, 0, -0.028, -0.015);
 
-        const armGeo = new THREE.BoxGeometry(0.022, 0.012, 0.14);
-        const propGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.008, 12);
+        // Electronics stack between the plates, held up by four standoffs
+        add(new THREE.BoxGeometry(0.036, 0.026, 0.04), pcbMat, 0, -0.012, 0);
+        const standoffGeo = new THREE.CylinderGeometry(0.0025, 0.0025, 0.042, 8);
+        for (const [x, z] of [[-0.022, -0.05], [0.022, -0.05], [-0.022, 0.05], [0.022, 0.05]]) {
+            add(standoffGeo, standoffMat, x, -0.004, z);
+        }
+        // Top plate, with a nose that runs forward to carry the camera cage
+        add(new THREE.BoxGeometry(0.05, 0.004, 0.175), carbonMat, 0, 0.019, -0.0375);
+
+        // Battery strapped to the top plate
+        add(new THREE.BoxGeometry(0.034, 0.028, 0.075), batteryMat, 0, 0.035, 0.012);
+        add(new THREE.BoxGeometry(0.03, 0.001, 0.045), labelMat, 0, 0.0495, 0.018);
+        add(new THREE.BoxGeometry(0.037, 0.031, 0.01), strapMat, 0, 0.035, 0.0);
+
+        // Camera cage on the top plate's nose. The pod inside sits on the FPV camera mount and tilts with the
+        // uptilt setting, so the angle you fly at is visible on the model in Line of Sight.
+        const cagePlateGeo = new THREE.BoxGeometry(0.003, 0.022, 0.024);
+        add(cagePlateGeo, carbonMat, -0.0135, 0.032, -0.115);
+        add(cagePlateGeo, carbonMat, 0.0135, 0.032, -0.115);
+
+        this.cameraPod = new THREE.Group();
+        this.cameraPod.position.set(0, this.cameraOffset.y, -0.115);
+        this.cameraPod.rotation.x = THREE.MathUtils.degToRad(this.fpvUptilt);
+        group.add(this.cameraPod);
+        add(new THREE.BoxGeometry(0.019, 0.019, 0.019), carbonMat, 0, 0, 0, this.cameraPod);
+        const lens = add(new THREE.CylinderGeometry(0.0065, 0.0075, 0.012, 16), carbonMat, 0, 0, -0.0155, this.cameraPod);
+        lens.rotation.x = Math.PI / 2;
+        const glass = add(new THREE.CircleGeometry(0.005, 16), lensMat, 0, 0, -0.0216, this.cameraPod);
+        glass.rotation.y = Math.PI; // CircleGeometry faces +Z; the lens looks down -Z
+
+        // Video antenna raked back off the rear of the top plate
+        const antenna = new THREE.Group();
+        antenna.position.set(0, 0.021, 0.048);
+        antenna.rotation.x = 0.6;
+        group.add(antenna);
+        add(new THREE.CylinderGeometry(0.0018, 0.0018, 0.03, 6), carbonMat, 0, 0.015, 0, antenna);
+        add(new THREE.CylinderGeometry(0.004, 0.004, 0.012, 10), carbonMat, 0, 0.036, 0, antenna);
+
+        // Rear LED, so the tail is easy to pick out against a dark background
+        add(new THREE.BoxGeometry(0.03, 0.006, 0.004), ledMat, 0, -0.028, 0.087).castShadow = false;
+
+        const armGeo = new THREE.BoxGeometry(0.02, 0.006, 0.127);
+        const footGeo = new THREE.CylinderGeometry(0.011, 0.007, 0.029, 12);
+        const motorGeo = new THREE.CylinderGeometry(0.014, 0.014, 0.016, 16);
+        const capGeo = new THREE.CylinderGeometry(0.006, 0.006, 0.006, 10);
+        const bladeGeo = new THREE.BoxGeometry(0.052, 0.0015, 0.011);
+        const discGeo = new THREE.CircleGeometry(0.06, 32);
 
         // Nose points down -Z (the FPV camera looks that way), so -Z corners are the front motors
         const motors = [
@@ -175,18 +236,34 @@ export class Renderer {
             { x: 0.09, z: 0.09, front: false }
         ];
 
-        for (const m of motors) {
-            const arm = new THREE.Mesh(armGeo, bodyMat);
-            arm.position.set(m.x * 0.5, 0, m.z * 0.5);
+        motors.forEach((m, i) => {
+            const arm = add(armGeo, carbonMat, m.x * 0.5, -0.028, m.z * 0.5);
             arm.rotation.y = Math.atan2(m.x, m.z); // point the arm's local +Z at the motor
-            arm.castShadow = true;
-            frame.add(arm);
 
-            const prop = new THREE.Mesh(propGeo, m.front ? frontMat : rearMat);
-            prop.position.set(m.x, 0.035, m.z);
-            prop.castShadow = true;
-            frame.add(prop);
-        }
+            add(footGeo, tpuMat, m.x, -0.0455, m.z);
+            add(motorGeo, motorMat, m.x, -0.017, m.z);
+
+            const propMat = m.front ? frontMat : rearMat;
+            const prop = new THREE.Group();
+            prop.position.set(m.x, -0.005, m.z);
+            prop.rotation.y = i * 0.7; // so the four props don't all sit at the same angle
+            group.add(prop);
+
+            add(capGeo, motorMat, 0, 0, 0, prop);
+            for (let b = 0; b < 3; b++) {
+                const blade = new THREE.Group();
+                blade.rotation.y = (b * Math.PI * 2) / 3;
+                prop.add(blade);
+                add(bladeGeo, propMat, 0.034, 0, 0, blade).rotation.x = 0.25; // blade pitch
+            }
+
+            // A faint disc where the blades sweep, which is what a spinning prop looks like
+            const disc = new THREE.Mesh(discGeo, new THREE.MeshBasicMaterial({
+                color: propMat.color, transparent: true, opacity: 0.15, depthWrite: false, side: THREE.DoubleSide, fog: false
+            }));
+            disc.rotation.x = -Math.PI / 2;
+            prop.add(disc);
+        });
 
         return group;
     }
@@ -215,6 +292,7 @@ export class Renderer {
         const wanted = Number.isFinite(degrees) ? degrees : this.fpvUptilt;
         this.fpvUptilt = Math.min(this.maxUptilt, Math.max(this.minUptilt, wanted));
         if (this.cameraMode === 'fpv') this.applyFpvUptilt();
+        this.cameraPod.rotation.x = THREE.MathUtils.degToRad(this.fpvUptilt);
         return this.fpvUptilt;
     }
 
