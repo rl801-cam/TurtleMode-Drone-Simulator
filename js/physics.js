@@ -14,11 +14,11 @@ export class PhysicsEngine {
         this.params = {
             mass: 0.5, // kg
             // Static thrust at full throttle - what the four props push hovering in still air.
-            maxThrust: 25, // Newtons (TWR of ~5:1 at the default mass)
+            maxThrust: 30, // Newtons (TWR of ~6:1 at the default mass)
             // How static thrust follows the throttle command: 0 is a straight line, 1 is
             // throttle squared. An ESC drives RPM roughly in step with the command and thrust
             // goes as RPM squared, but a loaded motor sags at the top, so real setups land in
-            // between. 0.6 hovers a 5:1 quad at about a third throttle, as a real one does.
+            // between. 0.6 hovers the default 6:1 quad at about 29% throttle, as a real one does.
             thrustCurve: 0.6,
             // Air speed through the prop disc at which a full-throttle prop stops pushing - its
             // pitch times its RPM, plus a little. Thrust falls away linearly towards it, which is

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TurtleMode Simulator</title>
-    <link rel="stylesheet" href="css/style.css?v=31">
+    <link rel="stylesheet" href="css/style.css?v=32">
     <!-- Import maps for ES modules. These resolve to vendored copies under vendor/, not to a CDN:
          the sim has to work offline and must not go dark when unpkg does. Versions are pinned by
          what is committed there, so bumping a dependency means replacing the file (see
@@ -48,7 +48,7 @@
                     <h3>Spec Class &mdash; Fixed</h3>
                     <div class="spec-grid">
                         <span>Mass</span><strong>0.5 kg</strong>
-                        <span>Max Thrust</span><strong>25 N</strong>
+                        <span>Max Thrust</span><strong>30 N</strong>
                         <span>Thrust Curve</span><strong>0.60</strong>
                         <span>Prop Pitch Speed</span><strong>60 m/s</strong>
                         <span>Air Drag</span><strong>1.00&times;</strong>
@@ -150,8 +150,8 @@
                     <input type="range" id="cfg-mass" min="0.1" max="2.0" step="0.1" value="0.5">
                 </div>
                 <div class="slider-group">
-                    <label for="cfg-thrust">Max Thrust: <span id="val-thrust">25</span> N</label>
-                    <input type="range" id="cfg-thrust" min="5" max="40" step="1" value="25">
+                    <label for="cfg-thrust">Max Thrust: <span id="val-thrust">30</span> N</label>
+                    <input type="range" id="cfg-thrust" min="5" max="40" step="1" value="30">
                 </div>
                 <div class="slider-group">
                     <label for="cfg-thrust-curve">Thrust Curve: <span id="val-thrust-curve">0.60</span></label>
@@ -308,6 +308,6 @@
         </div>
     </div>
 
-    <script type="module" src="js/main.js?v=31"></script>
+    <script type="module" src="js/main.js?v=32"></script>
 </body>
 </html>

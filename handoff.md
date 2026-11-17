@@ -54,7 +54,7 @@ the airframe to a fixed spec and times laps round a gated course, with a persist
   rasteriser for previews. Nothing here is loaded by the page.
 
 ### Default configuration
-Mass `0.5 kg` · Max thrust `25 N` (~5:1 TWR, hover near 33% throttle) · Thrust curve `0.6` ·
+Mass `0.5 kg` · Max thrust `30 N` (~6:1 TWR, hover near 29% throttle) · Thrust curve `0.6` ·
 Prop pitch speed `60 m/s` · Air drag `1.0×` · Restitution `0.2` · Surface grip `0.2` · Wind `0.1`
 on all three axes · Video latency `0 ms` · Camera uptilt `10°` · Default map `Bando`.
 
@@ -87,7 +87,7 @@ and no `Trimesh`; map geometry is merged into a single BVH and contacts are reso
 hovering in still air — is `maxThrust × ((1 − c)·t + c·t²)` for throttle `t` and thrust curve `c`.
 An ESC drives RPM roughly in step with the throttle and thrust goes as RPM², which would make it
 pure `t²`; a loaded motor sags at the top end, so real setups sit in between. `c = 0.6` hovers the
-default 5:1 airframe at 33% throttle, where real quads hover. The prop RPM fraction is then
+default 6:1 airframe at 29% throttle, where real quads hover. The prop RPM fraction is then
 `√(static fraction)`. Second, **thrust fades with inflow**: the component of velocity along the
 thrust axis (climbing, or leaning into a fast run) means each blade meets the air at a shallower
 angle, so thrust falls linearly to zero at `propPitchSpeed × rpmFraction`. That fall-off, not
@@ -112,16 +112,16 @@ identical in every direction — and was what let the old 5:1 airframe reach 255
 58 m/s. `angularDamping` is fixed at `0.5`, the value the crash solver was tuned with, and is no
 longer tied to the drag slider.
 
-What the default airframe does, measured headlessly against the shipped `physics.js`:
+What the default airframe does (25 N before, 30 N since v32), measured headlessly against the shipped `physics.js`:
 
-| | Before (v30) | Now (v31) |
+| | Before (v30, 25 N) | Now (v32, 30 N) |
 | --- | --- | --- |
-| Hover throttle | 19.6% | 32.9% |
-| Top speed, holding altitude | 71 m/s (255 km/h) at 78° lean | 29 m/s (103 km/h) at 73° lean |
-| Full-throttle vertical climb | 58 m/s | 25 m/s |
-| Punch-out to 20 m | 1.12 s | 1.27 s |
+| Hover throttle | 19.6% | 28.6% |
+| Top speed, holding altitude | 71 m/s (255 km/h) at 78° lean | 31 m/s (110 km/h) at 75° lean |
+| Full-throttle vertical climb | 58 m/s | 27 m/s |
+| Punch-out to 20 m | 1.12 s | 1.15 s |
 | Terminal velocity, belly / nose first | 14 / 14 m/s | 18 / 32 m/s |
-| Level out at hover, 10 → 2 m/s | 2.3 s, 11.5 m | 3.6 s, 17.5 m |
+| Level out at hover, 10 → 2 m/s | 2.3 s, 11.5 m | 3.9 s, 18.9 m |
 
 Landing and settling are unchanged: a flat drop, tilted drop, sliding landing and a 15 m/s crash
 all come to rest (|v| < 0.02 m/s, |ω| < 0.05 rad/s, disarmed) as before.
@@ -371,7 +371,7 @@ Each of these was found the hard way. They are load-bearing.
     the flight model itself — drag, thrust, rates, mass handling. Bump `BOARD_REVISION` in
     `race.js` and add a line to the comment above it saying what changed. Each revision has its own
     `localStorage` key, so nothing is deleted and an old build still finds its own board, but times
-    flown under different physics never share a table. Revision 2 came with the v31 flight model:
+    flown under different physics never share a table. Revision 2 came with the v31 flight model, revision 3 with the 30 N spec in v32:
     a lap set at 255 km/h top speed would otherwise sit at the top of the board for good.
 
 ## Caching — read this before debugging "my change did nothing"
@@ -391,7 +391,7 @@ node tools/bump-version.mjs 42        # set an explicit version
 node tools/bump-version.mjs --check   # print the current version, or exit 1 if files disagree
 ```
 
-**Current build: `v31`** — the tags live in `index.html` (stylesheet and the `main.js` script), the
+**Current build: `v32`** — the tags live in `index.html` (stylesheet and the `main.js` script), the
 import list at the top of `main.js`, the `tracks.js` import in `ui.js`, and the `BUILD` constant in
 `main.js`. `--check` exits non-zero if they have drifted apart, which is worth running before
 committing.
@@ -465,6 +465,9 @@ deliberately updated, and their URLs change with it.
     practice sliders (*Thrust Curve*, *Prop Pitch Speed*), *Air Drag* re-scaled to a multiplier,
     the spec class updated to match, and the leaderboards moved to revision 2. See *The flight
     model* and invariants 30–32.
+18. **Default and spec max thrust raised from 25 N to 30 N** (v32), about 6:1 thrust-to-weight:
+    v31 felt underpowered. Hover is at 29% throttle, top speed 110 km/h, climb 27 m/s. The
+    leaderboards moved to revision 3.
 
 ## Verification
 

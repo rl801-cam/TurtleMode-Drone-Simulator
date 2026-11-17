@@ -34,7 +34,7 @@
 // do, and update the spec sheet printed in index.html by hand.
 export const RACE_SPEC = {
     mass: 0.5,
-    thrust: 25,
+    thrust: 30,
     thrustCurve: 0.6,
     propPitchSpeed: 60,
     drag: 1.0,

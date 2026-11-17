@@ -40,7 +40,7 @@ hosted on GitHub Pages. Two modes: **Practice**, free flight with every paramete
 cache-busting tag, and the running build is logged to the console and shown in the launch menu.
 All twelve tags and the `BUILD` constant must agree, so they are bumped by tool rather than by hand
 — `node tools/bump-version.mjs`, with `--check` to verify they have not drifted. **The current
-build is `v31`.** `index.html` itself is not versioned, so a browser holding a stale copy of it will
+build is `v32`.** `index.html` itself is not versioned, so a browser holding a stale copy of it will
 keep requesting the old module versions — check the build stamp before debugging anything that looks
 like an unapplied change.
 
@@ -71,7 +71,7 @@ script and are the same fact as the table above.
 - Angular rate held by a P-controller against the commanded rate, as a flight controller does.
 - **Thrust curve.** Static thrust follows `(1 − c)·t + c·t²` of the throttle: an ESC drives RPM
   roughly in step with the stick and thrust goes as RPM², softened by a loaded motor's sag at the
-  top. The default `c = 0.6` hovers a 5:1 airframe at a third throttle, as a real one does.
+  top. The default `c = 0.6` hovers the 6:1 default airframe at 29% throttle, as a real one does.
 - **Thrust falls with airspeed through the props.** Climbing, or leaning into a fast run, sends air
   through the disc along the thrust axis, and thrust fades linearly to nothing at the prop's pitch
   speed (60 m/s at full RPM, scaling with RPM). This, more than drag, is what limits top speed and
@@ -81,9 +81,9 @@ script and are the same fact as the table above.
   18 m/s and nose first at 32, and drag is not simply opposite the velocity. **Rotor drag**, linear
   in speed and proportional to prop RPM, acts in the plane of the props: it dominates at low speed
   and is what stops a levelled-out quad drifting on like ice.
-- What that adds up to on the default airframe: 103 km/h top speed holding altitude at a 73° lean,
-  25 m/s straight up, 0–20 m in 1.27 s, and a 10 m/s drift settling to 2 m/s over 17.5 m when
-  levelled out at hover. Before v31 the same airframe did 255 km/h and 58 m/s straight up, on
+- What that adds up to on the default 30 N airframe: 110 km/h top speed holding altitude at a 75° lean,
+  27 m/s straight up, 0–20 m in 1.15 s, and a 10 m/s drift settling to 2 m/s over 18.9 m when
+  levelled out at hover. Before v31 the 25 N airframe did 255 km/h and 58 m/s straight up, on
   linear damping identical in every direction.
 - Adjustable mass, max thrust, thrust curve, prop pitch speed and air drag (a multiplier on both
   drag terms).
@@ -230,7 +230,7 @@ viewpoint to the start grid, and locks the airframe to a fixed spec.
   beats the stored record, the session best, or neither, gets a different toast. Boards are
   **revisioned**: a change to the spec or the flight model that alters lap times bumps
   `BOARD_REVISION` in `race.js` and starts a fresh board, so laps flown under different physics
-  never share a table. Revision 2 came with the v31 drag and thrust model; the revision 1 boards
+  never share a table. Revision 2 came with the v31 drag and thrust model and revision 3 with the 30 N spec in v32; older boards
   are still in storage, just no longer shown.
 - **HUD:** running lap time, lap number, next gate with its name and range, a pointer that swings to
   the next gate once it leaves the middle of the view, and last / best / record times. The next
@@ -264,7 +264,7 @@ viewpoint to the start grid, and locks the airframe to a fixed spec.
   pixels of a 1× one, for a difference invisible at that density and well over half the framerate.
 
 ### 3.10 Default Configuration
-Mass `0.5 kg` · Max thrust `25 N` (~5:1 TWR, hover near 33% throttle) · Thrust curve `0.6` ·
+Mass `0.5 kg` · Max thrust `30 N` (~6:1 TWR, hover near 29% throttle) · Thrust curve `0.6` ·
 Prop pitch speed `60 m/s` · Air drag `1.0×` · Restitution `0.2` · Surface grip `0.2` · Wind `0.1`
 on all three axes · Video latency `0 ms` · Camera uptilt `10°` · Default map `Bando`.
 

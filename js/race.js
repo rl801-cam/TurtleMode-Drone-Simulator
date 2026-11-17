@@ -23,7 +23,8 @@ const TORUS_AXIS = new THREE.Vector3(0, 0, 1);
 // localStorage untouched, so nothing is lost, but they are no longer shown.
 //   r1 (bare key)  linear damping, thrust linear in throttle - up to v30
 //   r2             quadratic airframe drag, rotor drag, thrust curve and prop pitch speed - v31
-const BOARD_REVISION = 2;
+//   r3             spec max thrust 25 -> 30 N - v32
+const BOARD_REVISION = 3;
 
 export class Leaderboard {
     constructor(trackId) {

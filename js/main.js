@@ -8,19 +8,19 @@
 //
 //   node tools/bump-version.mjs           advance to the next version
 //   node tools/bump-version.mjs --check   verify they have not drifted apart
-import { Renderer } from './renderer.js?v=31';
-import { PhysicsEngine } from './physics.js?v=31';
-import { InputHandler } from './input.js?v=31';
-import { UIHandler } from './ui.js?v=31';
-import { AudioEngine } from './audio.js?v=31';
-import { VideoDelay } from './latency.js?v=31';
-import { RaceManager } from './race.js?v=31';
-import { RACE_SPEC, formatTime } from './tracks.js?v=31';
+import { Renderer } from './renderer.js?v=32';
+import { PhysicsEngine } from './physics.js?v=32';
+import { InputHandler } from './input.js?v=32';
+import { UIHandler } from './ui.js?v=32';
+import { AudioEngine } from './audio.js?v=32';
+import { VideoDelay } from './latency.js?v=32';
+import { RaceManager } from './race.js?v=32';
+import { RACE_SPEC, formatTime } from './tracks.js?v=32';
 
 // Shown in the launch menu and logged on boot. index.html itself carries no cache buster, so a
 // browser holding a stale copy of it will keep loading the old ?v= modules and none of the tags
 // above will help. If this does not match the newest version, the page needs a hard reload.
-const BUILD = 'v31';
+const BUILD = 'v32';
 
 class Simulator {
     constructor() {
