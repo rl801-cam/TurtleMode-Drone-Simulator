@@ -8,19 +8,19 @@
 //
 //   node tools/bump-version.mjs           advance to the next version
 //   node tools/bump-version.mjs --check   verify they have not drifted apart
-import { Renderer } from './renderer.js?v=34';
-import { PhysicsEngine } from './physics.js?v=34';
-import { InputHandler } from './input.js?v=34';
-import { UIHandler } from './ui.js?v=34';
-import { AudioEngine } from './audio.js?v=34';
-import { VideoDelay } from './latency.js?v=34';
-import { RaceManager } from './race.js?v=34';
-import { RACE_SPEC, formatTime } from './tracks.js?v=34';
+import { Renderer } from './renderer.js?v=35';
+import { PhysicsEngine } from './physics.js?v=35';
+import { InputHandler } from './input.js?v=35';
+import { UIHandler } from './ui.js?v=35';
+import { AudioEngine } from './audio.js?v=35';
+import { VideoDelay } from './latency.js?v=35';
+import { RaceManager } from './race.js?v=35';
+import { RACE_SPEC, formatTime } from './tracks.js?v=35';
 
 // Shown in the launch menu and logged on boot. index.html itself carries no cache buster, so a
 // browser holding a stale copy of it will keep loading the old ?v= modules and none of the tags
 // above will help. If this does not match the newest version, the page needs a hard reload.
-const BUILD = 'v34';
+const BUILD = 'v35';
 
 class Simulator {
     constructor() {
@@ -343,19 +343,20 @@ class Simulator {
             // In FPV the camera rides the airframe, so showing a past pose is exactly what a
             // laggy feed looks like: the drone is already somewhere else by the time you see it.
             // In Line of Sight the pilot is watching the real drone with their own eyes and there
-            // is no video link to lag, so the mesh stays live.
+            // is no video link to lag, so the mesh stays live - and the chase view, which no real
+            // pilot has, stays live with it.
             const droneState = this.physics.getDroneState();
             this.videoDelay.push(droneState, now / 1000);
             const seen = this.renderer.cameraMode === 'fpv'
                 ? (this.videoDelay.sample(now / 1000) || droneState)
                 : droneState;
-            this.renderer.updateDrone(seen);
+            this.renderer.updateDrone(seen, stepDt);
             // The bird's wings and the target its controller is chasing. Live, like the LOS mesh;
             // in FPV neither is on screen.
             if (this.physics.flyingBird) this.renderer.updateBird(this.physics.getBirdState());
 
-            // 6. Aim the camera (no-op in FPV, where the camera rides on the drone)
-            this.renderer.updateCamera();
+            // 6. Aim the camera: LOS and chase (FPV rides the drone, on the rig updateDrone moved)
+            this.renderer.updateCamera(stepDt);
 
             // 7. Motor noise follows the stick inputs; wind noise follows how fast the
             // airframe is actually moving through the air

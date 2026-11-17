@@ -46,7 +46,7 @@ hummingbird's modules and the two model files it fetches carry a `?v=N` cache-bu
 running build is logged to the console and shown in the launch menu. All eighteen tags and the
 `BUILD` constant must agree, so they are bumped by tool rather than by hand
 — `node tools/bump-version.mjs`, with `--check` to verify they have not drifted. **The current
-build is `v34`.** `index.html` itself is not versioned, so a browser holding a stale copy of it will
+build is `v35`.** `index.html` itself is not versioned, so a browser holding a stale copy of it will
 keep requesting the old module versions — check the build stamp before debugging anything that looks
 like an unapplied change.
 
@@ -155,7 +155,10 @@ impulse solver rather than Cannon-es's narrowphase:
   watched from beside the start grid. Adjustable zoom (FOV), a distance readout on the OSD, and a
   visible airframe with red front props and white rear props so orientation stays readable at
   range.
-- `C` switches view in flight; the choice persists across sessions.
+- **Chase** — follows from behind and a little above, on the drone's heading: eased so it swings
+  round behind the drone rather than being bolted to it, and pulled in short of any wall or ceiling
+  between it and the drone. 70° FOV; 1.6 m back for the quad, 45 cm for the hummingbird.
+- `C` cycles FPV → Chase → Line of Sight in flight; the choice persists across sessions.
 - **Video latency**, 0–200 ms. The FPV feed is buffered and shown late, so the picture trails the
   drone the way a real video link does — analog about 20–30 ms glass to glass, digital 30–40, and
   past 100 ms is a link in trouble. Only the *view* lags: the sticks reach the flight model at
@@ -277,15 +280,21 @@ A second practice vehicle: Purdue's flapping-wing robot from the *flappy* simula
   (§4): torso plus two leading edges and two wings, motor-driven stroke joints on springs, passive
   wing rotation stopped at ±45°, quasi-steady blade-element wing aerodynamics, a DC motor model
   per wing, at 10 kHz with the controller at 500 Hz.
-- **Piloting** is through the controller: the sticks move the point it chases, at up to 0.2 m/s
-  (what it was trained on). Throttle climbs and descends with the centre holding height; pitch and
-  roll move it; yaw turns it at about 35°/s by turning the world it is shown, never more than 17°
-  ahead of where it points.
+- **Piloting** is through the controller: the sticks move the point it chases. Throttle climbs and
+  descends with the centre holding height; pitch and roll move it; yaw turns it at about 35°/s by
+  turning the world it is shown, never more than 17° ahead of where it points.
+- **Top speed**, sideways and vertical alike: 1 m/s by default, 0.2–2 m/s on a slider. The
+  controller was trained on 0.15 m/s, but measured here it follows up to 2 m/s with no crashes
+  (about 4 cm behind at 1 m/s, 6 cm at 2 m/s) as long as the target's speed changes no faster than
+  1 m/s² — at 2 m/s² a sharp reversal flips it.
 - **Takeoff and landing.** It starts sitting on the ground under the spawn and lifts off when the
-  throttle goes up; the target eases in over the last few centimetres on the way down, and a slow
-  touchdown is a landing. Anything else touching the map in flight is a crash — `R` to reset.
-- **Cameras.** FPV rides on its head; Line of Sight stands 1 m back and 0.8 m up, and marks the
-  target with a dot and a line dropped to the ground.
+  throttle goes up. On the way down the target brakes in time to stop at the ground — at most
+  √(2·0.4 m/s²·height) — and eases in over the last few centimetres, so a landing works from any
+  descent speed; a slow touchdown is a landing. Anything else touching the map in flight is a crash — `R` to reset.
+- **Cameras.** FPV rides on its head, smoothed: the torso rocks with every wingbeat, so the camera
+  sees the bird's pose averaged over each frame and then low-passed (0.08 s), which cuts the
+  frame-to-frame shake about eightfold. Chase follows 45 cm behind; Line of Sight stands 1 m back and
+  0.8 m up. Both mark the target with a dot and a line dropped to the ground.
 - **Not modelled for the bird:** wind, contact physics (a touch is a crash) and motor sound. The
   controller sees the true state rather than flappy's simulated IMU and motion capture, and hovers
   about 2 cm below its target, a steady offset it was trained with.
@@ -297,7 +306,7 @@ on all three axes · Video latency `0 ms` · Camera uptilt `10°` · Default map
 
 Racing uses the same numbers with wind off and latency pinned at zero.
 
-**What persists:** camera mode, LOS zoom, camera uptilt, speed readout, audio, game mode, practice
+**What persists:** camera mode (FPV, chase or line of sight), LOS zoom, camera uptilt, speed readout, audio, game mode, practice
 vehicle, track, pilot name and the leaderboards. Rates, physics parameters and axis mappings do not.
 
 ## 4. Verification
@@ -306,8 +315,8 @@ vehicle, track, pilot name and the leaderboards. Rates, physics parameters and a
 against reference data recorded from flappy's DART simulation (`export_simulator.py --reference`
 in the flappy repository): kinematics, mass matrix, bias forces and wing aerodynamics at random
 states to about 1e-12, single 10 kHz steps to 1e-9, an open-loop replay, the controller's
-observations and actions, a 4 s closed-loop flight that stays within 5 mm of DART's, and a
-scripted pilot session from takeoff to landing. It runs in a couple of seconds.
+observations and actions, a 4 s closed-loop flight that stays within 5 mm of DART's, and
+scripted pilot sessions from takeoff to landing at 0.2 m/s and at the default 1 m/s. It runs in a couple of seconds.
 
 `physics.js` and `audio.js` are deliberately free of DOM dependencies, so they can be driven
 headlessly under Node — against synthetic collision callbacks and a stubbed Web Audio API

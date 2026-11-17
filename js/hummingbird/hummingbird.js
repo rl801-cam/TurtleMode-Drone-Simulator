@@ -19,8 +19,8 @@
 // motion-capture system. Here it gets the true state, which flies as well or better on the standard
 // robot (measured in flappy: moving and takeoff 30/30 both ways, errors equal or lower).
 
-import { Flapper } from './flapper.js?v=34';
-import { Policy, flappyRotation, actionToVoltages } from './policy.js?v=34';
+import { Flapper } from './flapper.js?v=35';
+import { Policy, flappyRotation, actionToVoltages } from './policy.js?v=35';
 
 export const BIRD_STATE = {
     LANDED: 'landed', // sitting on the ground, held there; wings flap while armed
@@ -36,10 +36,13 @@ export class Hummingbird {
         this.dtControl = robot.dt_control;
         this.dtSensor = robot.dt_control; // flappy's f_sensor equals f_control (500 Hz)
 
-        // Pilot command limits: the controller was trained on targets moving up to 0.15 m/s
-        // sideways and climbing at up to 0.3 m/s, and flew 0.2 m/s letters cleanly.
-        this.maxSpeed = options.maxSpeed ?? 0.2; // m/s, horizontal, full stick
-        this.maxClimb = options.maxClimb ?? 0.2; // m/s, vertical, full stick
+        // Pilot command limits. The controller was trained on targets moving at up to 0.15 m/s
+        // sideways and climbing at up to 0.3 m/s, but measured here it follows far faster: forward,
+        // sideways, up, down and stick reversals all without a crash up to 2 m/s, about 4 cm behind
+        // at 1 m/s and 6 cm at 2 m/s. What breaks it is acceleration: at 2 m/s^2 a sharp reversal
+        // flips it, so the target's speed follows the stick at maxAccel and no faster.
+        this.maxSpeed = options.maxSpeed ?? 1.0; // m/s, horizontal, full stick
+        this.maxClimb = options.maxClimb ?? 1.0; // m/s, vertical, full stick
         this.maxAccel = options.maxAccel ?? 1.0; // m/s^2, how fast the target's speed follows the stick
         // Heading. The controller was trained to hold yaw at zero; it turns by being shown a world
         // rotated under it, so the heading error it sees has to stay small - training started it
@@ -69,6 +72,7 @@ export class Hummingbird {
         // out of), so the bird touches down while the target is still a little way up
         this.landingTargetHeight = 0.05; // m above the resting height
         this.flareRate = 2; // 1/s
+        this.flareDecel = 0.4; // m/s^2, comfortably inside maxAccel so the target can keep to it
         this.touchdownSpeed = 0.03; // m/s
 
         // Environment queries, supplied by the host (physics.js), in flappy coordinates: the height of
@@ -274,12 +278,15 @@ export class Hummingbird {
         const hs = Math.hypot(want[0], want[1]);
         if (hs > this.maxSpeed) { want[0] *= this.maxSpeed / hs; want[1] *= this.maxSpeed / hs; }
         // The ground under the target, looked for from above both the target and the bird. Coming
-        // down, the target eases in over the last few centimetres, so the bird - which trails it by a
-        // couple of centimetres - arrives slowly enough to land instead of hitting the ground.
+        // down, the target brakes in time to stop at the ground - descent speed no more than
+        // sqrt(2 a h) at height h, braking at flareDecel - and eases in over the last few centimetres,
+        // so the bird, which trails it by a couple of centimetres, arrives slowly enough to land
+        // instead of hitting the ground.
         const below = this.groundAt(this.target[0], this.target[1], Math.max(this.target[2], com[2]) + 0.02);
         if (below !== null && want[2] < 0) {
-            const above = this.target[2] - (below + this.restHeight);
-            want[2] = Math.max(want[2], -Math.max(this.touchdownSpeed, this.flareRate * above));
+            const above = Math.max(0, this.target[2] - (below + this.restHeight));
+            const brake = Math.min(this.flareRate * above, Math.sqrt(2 * this.flareDecel * above));
+            want[2] = Math.max(want[2], -Math.max(this.touchdownSpeed, brake));
         }
         const dv = this.maxAccel * dt;
         for (let i = 0; i < 3; i++) {
@@ -303,7 +310,9 @@ export class Hummingbird {
 
     // Run in real time: as many control periods as fit in dt (capped, so a stalled tab does not
     // try to catch up on seconds of flight at once)
-    advance(dt, maxStep = 0.05) {
+    // onStep, if given, is called after every control period (physics.js averages the pose over a
+    // frame with it).
+    advance(dt, maxStep = 0.05, onStep = null) {
         this.simAhead += Math.min(dt, maxStep);
         let n = 0;
         while (this.simAhead >= this.dtControl) {
@@ -311,6 +320,7 @@ export class Hummingbird {
             this.controlStep();
             this.simAhead -= this.dtControl;
             n++;
+            if (onStep) onStep();
         }
         return n;
     }

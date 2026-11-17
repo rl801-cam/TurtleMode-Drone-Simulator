@@ -163,9 +163,9 @@ const f = new Flapper(robot);
     check('distance from the target over the last 0.5 s, m', endTracking, 0.06);
 }
 
-// ---- 5. a pilot's session on the sticks, over flat ground ----
+// ---- 5. a pilot's session on the sticks, over flat ground, at the trained 0.2 m/s ----
 {
-    const bird = new Hummingbird(robot, policy);
+    const bird = new Hummingbird(robot, policy, { maxSpeed: 0.2, maxClimb: 0.2 });
     bird.reset([0, 0, 0], 0);
     bird.setArmed(true);
     const states = [];
@@ -203,6 +203,37 @@ const f = new Flapper(robot);
     check('turned right about 100 deg (error, deg)', Math.abs(turned - 100), 30);
     check('landed at the end (0 = yes)', bird.state === 'landed' ? 0 : 1, 0);
     check('mean distance from the target in flight, m', errSum / errN, 0.04);
+}
+
+// ---- 6. the default 1 m/s: a fast climb, a dash out and straight back, a fast descent ----
+{
+    const bird = new Hummingbird(robot, policy);
+    bird.reset([0, 0, 0], 0);
+    bird.setArmed(true);
+    let errSum = 0, errN = 0, crashed = false;
+    const fly = (secs, forward, right, up) => {
+        bird.setSticks(forward, right, up, 0);
+        for (let i = 0; i < Math.round(secs / bird.dtControl) && !crashed; i++) {
+            bird.controlStep();
+            crashed = bird.state === 'crashed';
+            if (bird.state === 'flying') {
+                const c = bird.flapper.comPosition();
+                errSum += Math.hypot(c[0] - bird.target[0], c[1] - bird.target[1], c[2] - bird.target[2]);
+                errN++;
+            }
+        }
+    };
+    fly(3, 0, 0, 1); // climb to about 2.5 m
+    const height = bird.flapper.comPosition()[2];
+    fly(4, 1, 0, 0); // dash forward...
+    fly(4, -1, 0, 0); // ...and straight back: a full-speed reversal
+    fly(4, 0, 1, 0);
+    fly(1, 0, 0, 0);
+    fly(8, 0, 0, -1); // all the way down
+    console.log(`-- fast session (${bird.maxSpeed} m/s): climbed to ${height.toFixed(2)} m, ended ${bird.state}`);
+    check('never crashed at 1 m/s (0 = yes)', crashed ? 1 : 0, 0);
+    check('landed after a full-speed descent (0 = yes)', bird.state === 'landed' ? 0 : 1, 0);
+    check('mean distance from the target at 1 m/s, m', errSum / errN, 0.06);
 }
 
 console.log(failures ? `\n${failures} check(s) failed` : '\nall checks passed');

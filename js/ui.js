@@ -1,6 +1,9 @@
 // ui.js - Handles DOM interactions and Menus
 
-import { TRACKS, DEFAULT_TRACK, formatTime } from './tracks.js?v=34';
+import { TRACKS, DEFAULT_TRACK, formatTime } from './tracks.js?v=35';
+
+// Flight views, in the order 'C' cycles through them
+const CAMERA_MODES = ['fpv', 'chase', 'los'];
 
 export class UIHandler {
     constructor(physicsEngine, inputHandler, renderer, race, startCallback, resumeCallback, resetCallback, exitCallback) {
@@ -20,7 +23,9 @@ export class UIHandler {
             ? localStorage.getItem('trackId')
             : DEFAULT_TRACK;
         this.speedReadoutEnabled = localStorage.getItem('speedReadoutEnabled') === 'true';
-        this.cameraMode = localStorage.getItem('cameraMode') === 'los' ? 'los' : 'fpv';
+        this.cameraMode = CAMERA_MODES.includes(localStorage.getItem('cameraMode'))
+            ? localStorage.getItem('cameraMode')
+            : 'fpv';
         // What practice flies: the quad, or the flapping-wing hummingbird. Races always use the quad.
         this.vehicle = localStorage.getItem('vehicle') === 'bird' ? 'bird' : 'quad';
         this.losFov = parseFloat(localStorage.getItem('losFov')) || 50;
@@ -328,26 +333,28 @@ export class UIHandler {
     }
 
     applyCameraMode(mode) {
-        this.cameraMode = mode === 'los' ? 'los' : 'fpv';
+        this.cameraMode = CAMERA_MODES.includes(mode) ? mode : 'fpv';
         localStorage.setItem('cameraMode', this.cameraMode);
 
         if (this.elements.viewMode) this.elements.viewMode.value = this.cameraMode;
         if (this.elements.losOptions) {
             this.elements.losOptions.style.display = this.cameraMode === 'los' ? 'block' : 'none';
         }
-        // Video latency is a property of the feed, and in Line of Sight there is no feed - the
-        // pilot is watching the drone itself. Hide it rather than leave a control that does nothing.
+        // Uptilt and video latency belong to the onboard camera and its feed. Line of Sight and
+        // chase have neither, so hide them rather than leave controls that do nothing.
         if (this.elements.fpvOptions) {
-            this.elements.fpvOptions.style.display = this.cameraMode === 'los' ? 'none' : 'block';
+            this.elements.fpvOptions.style.display = this.cameraMode === 'fpv' ? 'block' : 'none';
         }
-        // The FPV crosshair is meaningless when watching from the ground
-        this.elements.osd.classList.toggle('los-view', this.cameraMode === 'los');
+        // The FPV crosshair is meaningless when watching from outside the drone
+        this.elements.osd.classList.toggle('los-view', this.cameraMode !== 'fpv');
 
         this.renderer.setCameraMode(this.cameraMode);
     }
 
+    // 'C' in flight: FPV -> chase -> line of sight -> FPV
     toggleCameraMode() {
-        this.applyCameraMode(this.cameraMode === 'los' ? 'fpv' : 'los');
+        const i = CAMERA_MODES.indexOf(this.cameraMode);
+        this.applyCameraMode(CAMERA_MODES[(i + 1) % CAMERA_MODES.length]);
     }
 
     initEventListeners() {
@@ -510,6 +517,7 @@ export class UIHandler {
         bindSlider('cfg-thrust', 'val-thrust', (val) => this.physics.updateConfig({ thrust: val }));
         bindSlider('cfg-thrust-curve', 'val-thrust-curve', (val) => this.physics.updateConfig({ thrustCurve: val }), 2);
         bindSlider('cfg-pitch-speed', 'val-pitch-speed', (val) => this.physics.updateConfig({ propPitchSpeed: val }), 0);
+        bindSlider('cfg-bird-speed', 'val-bird-speed', (val) => this.physics.updateConfig({ birdSpeed: val }), 1);
         bindSlider('cfg-drag', 'val-drag', (val) => this.physics.updateConfig({ drag: val }));
         bindSlider('cfg-restitution', 'val-restitution', (val) => this.physics.updateConfig({ restitution: val }), 2);
         bindSlider('cfg-friction', 'val-friction', (val) => this.physics.updateConfig({ friction: val }), 2);
@@ -638,6 +646,7 @@ export class UIHandler {
             drag: num('cfg-drag'),
             restitution: num('cfg-restitution'),
             friction: num('cfg-friction'),
+            birdSpeed: num('cfg-bird-speed'),
             wind: {
                 strength: num('cfg-wind'),
                 roll: checked('wind-roll'),

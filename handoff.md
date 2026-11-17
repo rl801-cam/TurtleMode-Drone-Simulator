@@ -156,14 +156,26 @@ in flappy's axes inside a group carrying the same rotation, so joint offsets and
 are the robot's own numbers.
 
 **Piloting.** The sticks never touch the motors. They move the *target* - the point the controller
-chases - at up to 0.2 m/s (throttle up/down with the centre holding height, pitch/roll
-forward/sideways), and turn its heading at 0.6 rad/s. Turning works by rotating the world the
+chases - at up to `params.birdSpeed`, 1 m/s by default and 0.2-2 m/s on the Top Speed slider
+(throttle up/down with the centre holding height, pitch/roll forward/sideways), and turn its
+heading at 0.6 rad/s. The controller was trained on 0.15 m/s targets but follows up to 2 m/s;
+the target's *acceleration* is what has to stay gentle (`maxAccel`, 1 m/s^2). Turning works by rotating the world the
 controller is shown: it was trained to hold yaw at zero, so the target heading is kept within 0.3 rad
 of where the bird actually points. The target is leashed to 25 cm from the bird and never goes below
 the ground. Takeoff and crashes follow flappy's `Floor` rules (held on the ground until the target
 rises; airborne 2 cm up; a takeoff fails if the target is 25 cm up first; touching anything after
-that is a crash), plus a landing: coming down, the target eases in over the last few centimetres,
-and a slow touchdown with the target near the ground re-parks the bird.
+that is a crash), plus a landing: coming down, the target brakes in time to stop at the ground and
+eases in over the last few centimetres, and a slow touchdown with the target near the ground
+re-parks the bird.
+
+**Cameras.** The torso rocks with every wingbeat, which on an onboard camera is a violent shake.
+Two things take it out. `stepBird()` gives `droneBody` the bird's pose *averaged* over the control
+periods each frame covered, so the 34 Hz rocking cannot alias into a slow wobble at the frame rate
+(the wings are still drawn at their instantaneous angles). Then the FPV camera, which rides a rig
+rather than the drone mesh, follows the mesh through a 0.08 s low-pass (`fpvSmoothing`, 0 for the
+quad). Measured in hover: 1.6 degrees of camera rotation per frame raw, 0.9 averaged, 0.2 with both.
+The chase view (`updateCamera()`) works for both vehicles: eased towards a point behind and above
+the drone on its smoothed heading, pulled in short of anything in the way by a `sweep()`.
 
 **Getting a new controller or robot in.** `export_simulator.py` in the flappy repository writes
 `robot.json` and `<model>.json` (`--out`) and the test reference (`--reference`). Point
@@ -190,6 +202,16 @@ observations and 4 actions.
 36. **The controller hovers about 2 cm below its target.** It is a steady offset in the trained
     policy, not a bug here, and the landing rule allows for it: a touchdown counts while the target
     is within 5 cm of the ground, or the bird reaches the ground first and every landing is a crash.
+37. **The target may only accelerate at 1 m/s^2, and the landing flare must brake inside that.**
+    Measured: at 2 m/s^2 a full-stick reversal flips the bird; at 1 m/s^2 it survives reversals at
+    2 m/s. The flare limits descent to sqrt(2 x 0.4 m/s^2 x height); a flare that asks the target to
+    slow faster than maxAccel allows (the first one did: 2 m/s^2 at 1 m/s) lets it reach the ground
+    still moving, and every fast descent ends in a crash.
+38. **The FPV camera hangs off `cameraRig`, not the drone mesh.** `updateDrone()` moves the rig,
+    copying the mesh exactly when `fpvSmoothing` is 0 - so for the quad, invariants 9 and 14 hold as
+    before, with "the rig" read for "the drone mesh". `resetCamera()` sets a snap flag so neither the
+    rig nor the chase camera glides in from where the drone was before a reset; a call to
+    `updateDrone()` without a frame time snaps too, which is what `exit()` relies on.
 
 ## How racing works
 
@@ -313,7 +335,7 @@ Each of these was found the hard way. They are load-bearing.
    starting the race somewhere under the map.
 9. **`renderer.resetCamera()` must be the last thing before the flip to `PLAYING`, with no `await`
    between the two.** The menu's orbiting shot in `animate()` runs on every `MENU` frame and writes
-   straight into the camera — and in FPV the camera is a child of the drone mesh, so what it writes
+   straight into the camera — and in FPV the camera is a child of the camera rig (invariant 38), which follows the drone mesh, so what it writes
    is a *local* transform. Resetting before `await loadMap()` therefore handed every loading frame
    (a 45 MB download plus ~500 ms of collider build) the chance to undo it, and the first flying
    frame looked out from a metre or two off the airframe pointing nowhere near the nose — which
@@ -340,8 +362,8 @@ Each of these was found the hard way. They are load-bearing.
 14. **Video latency delays the view only, and only in FPV.** `physics.setInputs()` takes the live
     sticks and the solver runs live — the drone is genuinely where the physics says, the pilot
     just finds out late, which is the whole point. The delay is applied to the pose handed to
-    `renderer.updateDrone()`, and in FPV the camera is a child of the drone mesh, so delaying the
-    mesh delays the picture exactly. In Line of Sight the mesh must stay live: the pilot is
+    `renderer.updateDrone()`, and in FPV the camera rides the rig that follows the drone mesh
+    (exactly, for the quad), so delaying the mesh delays the picture exactly. In Line of Sight the mesh must stay live: the pilot is
     watching the real airframe with their own eyes and there is no feed to lag. Audio stays live
     for the same reason. Two further traps: `VideoDelay.push()` copies the components out because
     the physics body mutates its position and quaternion in place — holding the object would make
@@ -456,7 +478,7 @@ node tools/bump-version.mjs 42        # set an explicit version
 node tools/bump-version.mjs --check   # print the current version, or exit 1 if files disagree
 ```
 
-**Current build: `v34`** — the tags live in `index.html` (stylesheet and the `main.js` script), the
+**Current build: `v35`** — the tags live in `index.html` (stylesheet and the `main.js` script), the
 import list at the top of `main.js`, the `tracks.js` import in `ui.js`, the hummingbird import and
 its two model-file URLs in `physics.js`, the hummingbird modules' imports of each other, and the
 `BUILD` constant in `main.js`. A new tagged import in any other file has to be added to `FILES` in
@@ -540,6 +562,11 @@ deliberately updated, and their URLs change with it.
     landing and crash rules, a model with flapping wings, a head-mounted FPV camera and a closer
     Line of Sight viewpoint with a target marker. The first part of the project with a committed
     test. See *How the hummingbird works* and invariants 33-36.
+20. **Faster bird, steadier cameras** (v35). The bird's top speed went from 0.2 to 1 m/s, with a
+    0.2-2 m/s slider, after measuring how fast the controller can really follow; the landing flare
+    became a braking profile so landings survive fast descents. The bird's FPV camera is smoothed
+    (frame-averaged pose plus a low-pass on a camera rig), and a Chase view joined FPV and Line of
+    Sight for both vehicles. See invariants 37-38.
 
 ## Verification
 
@@ -555,8 +582,10 @@ random states: body transforms, centre-of-mass position and velocity, mass matri
 gravity forces and wing aerodynamics, all within about 1e-12 of DART. Then every 10 kHz step of the
 start of a flight, each started from DART's own state (positions within 1e-9), an open-loop replay of
 the recorded drive, the controller's observations and actions, and the whole 4 s closed-loop flight,
-which stays within 5 mm of DART's path. Last, a scripted pilot session over flat ground: parked
-until the throttle goes up, a climb to 50 cm, a metre forward, a turn, and a landing. Regenerate the
+which stays within 5 mm of DART's path. Last, two scripted pilot sessions over flat ground: at the
+trained 0.2 m/s, parked until the throttle goes up, a climb to 50 cm, a metre forward, a turn and a
+landing; and at the default 1 m/s, a climb to 3 m, a dash out and straight back, and a landing from
+a full-speed descent. Regenerate the
 reference whenever the robot or the controller changes.
 
 The browser side - vehicle switching, ground placement on the real maps, wall hits, the OSD - was
@@ -690,8 +719,9 @@ gap that matters most.
       per episode, and the controller was trained on that; the browser flies the nominal robot.
     * *Wind, contacts and sound.* No wind acts on the bird, a touch in flight is a crash rather than
       a bounce, and it is silent (the motor audio is a quad's props, so it is gated off).
-    * *Its controller's limits.* Targets faster than 0.2 m/s are outside what it was trained on, it
-      holds height about 2 cm low, and it recovers unreliably from large tilts.
+    * *Its controller's limits.* It was trained on 0.15 m/s; everything up to the 2 m/s slider limit
+      was measured here rather than trained for, and it falls behind faster than that. It holds
+      height about 2 cm low and recovers unreliably from large tilts.
     * *Self-collision.* DART checked the wings against the torso; the port does not. It never
       mattered in the reference flights.
 

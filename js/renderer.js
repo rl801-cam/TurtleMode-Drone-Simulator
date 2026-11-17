@@ -108,10 +108,28 @@ export class Renderer {
         this.scene.add(this.droneMesh);
         this.createBirdTargetMarker();
 
-        // Attach Camera to Drone
-        this.droneMesh.add(this.camera);
+        // The FPV camera rides a rig that follows the drone mesh. For the quad the rig copies the
+        // mesh exactly every frame, so it behaves as if mounted on the airframe. The hummingbird's
+        // torso rocks with every wingbeat (34 Hz), so for it the rig follows through a low-pass of
+        // fpvSmoothing seconds and the picture holds steady (setVehicle).
+        this.cameraRig = new THREE.Group();
+        this.scene.add(this.cameraRig);
+        this.fpvSmoothing = 0;
+        this._snapRig = true;
+        this.cameraRig.add(this.camera);
         this.camera.position.copy(this.cameraOffset);
         this.applyFpvUptilt();
+
+        // Chase view: following from behind and a little above, on the drone's heading. Its own
+        // smoothing makes it swing round behind the drone rather than being bolted to it. Set per
+        // vehicle in setVehicle.
+        this.chase = { distance: 1.6, height: 0.5, lookUp: 0.1, fov: 70, followTime: 0.15, turnTime: 0.35 };
+        this._chaseForward = new THREE.Vector3(0, 0, -1);
+        this._chaseLook = new THREE.Vector3();
+        this._chaseWanted = new THREE.Vector3();
+        this._snapChase = true;
+        this._v1 = new THREE.Vector3();
+        this._v2 = new THREE.Vector3();
 
         // Line of Sight pilot position: standing a few metres behind the spawn point.
         // Spawn matches PhysicsEngine.reset() so the pilot always ends up next to the drone.
@@ -384,10 +402,14 @@ export class Renderer {
             this.cameraOffset.set(0, 0.022, -0.012);
             this.losEyeHeight = 0.8;
             this.losStandoff = 1.0;
+            this.fpvSmoothing = 0.08;
+            Object.assign(this.chase, { distance: 0.45, height: 0.12, lookUp: 0.02 });
         } else {
             this.cameraOffset.set(0, 0.03, -0.13);
             this.losEyeHeight = 5;
             this.losStandoff = 3;
+            this.fpvSmoothing = 0;
+            Object.assign(this.chase, { distance: 1.6, height: 0.5, lookUp: 0.1 });
             this.birdTarget.visible = false;
             this.birdTargetLine.visible = false;
         }
@@ -402,7 +424,7 @@ export class Renderer {
             j.leadingEdge.quaternion.setFromAxisAngle(j.axis, state.stroke[k]);
             j.wing.rotation.set(0, state.rotate[k], 0);
         }
-        const show = this.cameraMode === 'los' && state.state !== 'crashed';
+        const show = this.cameraMode !== 'fpv' && state.state !== 'crashed';
         this.birdTarget.visible = show;
         this.birdTargetLine.visible = show && state.targetGround !== null;
         if (!show) return;
@@ -417,16 +439,17 @@ export class Renderer {
         }
     }
 
+    // 'fpv' rides the drone, 'los' stands near the spawn, 'chase' follows from behind
     setCameraMode(mode) {
-        this.cameraMode = mode === 'los' ? 'los' : 'fpv';
+        this.cameraMode = mode === 'los' || mode === 'chase' ? mode : 'fpv';
 
-        if (this.cameraMode === 'los') {
-            // Detach from the drone so the camera stays anchored in the world
+        if (this.cameraMode !== 'fpv') {
+            // Detach from the drone so the camera moves in the world
             this.scene.add(this.camera);
-            this.camera.fov = this.losFov;
+            this.camera.fov = this.cameraMode === 'los' ? this.losFov : this.chase.fov;
             this.droneMesh.visible = true;
         } else {
-            this.droneMesh.add(this.camera);
+            this.cameraRig.add(this.camera);
             this.camera.fov = this.fpvFov;
             this.droneMesh.visible = false;
             // the bird's target sits centimetres from its head camera
@@ -478,14 +501,48 @@ export class Renderer {
     // Distance from the listener to the drone, for audio attenuation. In FPV the camera rides the
     // airframe, so the listener is effectively on the drone and there is nothing to attenuate.
     getListenerDistance() {
-        return this.cameraMode === 'los' ? this.getLosDistance() : 0;
+        if (this.cameraMode === 'los') return this.getLosDistance();
+        if (this.cameraMode === 'chase') return this.camera.position.distanceTo(this.droneMesh.position);
+        return 0;
     }
 
-    // Keeps the LOS camera pinned near spawn and always aimed at the drone
-    updateCamera() {
-        if (this.cameraMode !== 'los') return;
-        this.camera.position.copy(this.losEye);
-        this.camera.lookAt(this.droneMesh.position);
+    // LOS: pinned near spawn, always aimed at the drone. Chase: eased towards a point behind and
+    // above the drone on its (smoothed) heading, pulled in short of anything in the way.
+    updateCamera(dt = 0) {
+        if (this.cameraMode === 'los') {
+            this.camera.position.copy(this.losEye);
+            this.camera.lookAt(this.droneMesh.position);
+            return;
+        }
+        if (this.cameraMode !== 'chase') return;
+
+        const c = this.chase, target = this.droneMesh.position;
+        const snap = this._snapChase || !(dt > 0);
+        this._snapChase = false;
+        const ease = (tau) => (snap ? 1 : 1 - Math.exp(-dt / tau));
+
+        // heading: the drone's nose flattened onto the ground, kept if it points straight up/down
+        const fwd = this._v1.set(0, 0, -1).applyQuaternion(this.droneMesh.quaternion);
+        fwd.y = 0;
+        if (fwd.lengthSq() > 1e-4) {
+            fwd.normalize();
+            this._chaseForward.lerp(fwd, ease(c.turnTime));
+            if (this._chaseForward.lengthSq() < 1e-6) this._chaseForward.copy(fwd);
+            this._chaseForward.normalize();
+        }
+
+        const look = this._v2.copy(target);
+        look.y += c.lookUp;
+        const wanted = this._chaseWanted.copy(look).addScaledVector(this._chaseForward, -c.distance);
+        wanted.y += c.height - c.lookUp;
+        // a wall or ceiling between the drone and the camera's spot brings the camera in front of it
+        const hit = this.sweep(look, wanted);
+        if (hit) wanted.copy(hit.point).addScaledVector(hit.normal, 0.02);
+
+        this.camera.position.lerp(wanted, ease(c.followTime));
+        if (snap) this._chaseLook.copy(look);
+        else this._chaseLook.lerp(look, ease(0.05));
+        this.camera.lookAt(this._chaseLook);
     }
 
     // Returns the in-flight load for a map that is already loading/loaded, so callers always
@@ -802,19 +859,38 @@ export class Renderer {
     }
 
     resetCamera() {
+        // Smoothing must not glide the view in from wherever the drone was before a reset
+        this._snapRig = true;
+        this._snapChase = true;
         if (this.cameraMode === 'los') {
             this.camera.position.copy(this.losEye);
             this.camera.lookAt(this.droneMesh.position);
+            return;
+        }
+        if (this.cameraMode === 'chase') {
+            this.updateCamera(0);
             return;
         }
         this.camera.position.copy(this.cameraOffset);
         this.applyFpvUptilt();
     }
 
-    updateDrone(state) {
-        // State contains position and quaternion from physics engine
+    // State contains position and quaternion from the physics engine. dt is the frame time, for
+    // the camera rig's smoothing; without it (or with no smoothing set) the rig snaps to the mesh.
+    updateDrone(state, dt = 0) {
         this.droneMesh.position.copy(state.position);
         this.droneMesh.quaternion.copy(state.quaternion);
+
+        const rig = this.cameraRig;
+        if (this._snapRig || !(this.fpvSmoothing > 0) || !(dt > 0)) {
+            rig.position.copy(this.droneMesh.position);
+            rig.quaternion.copy(this.droneMesh.quaternion);
+            this._snapRig = false;
+        } else {
+            const a = 1 - Math.exp(-dt / this.fpvSmoothing);
+            rig.position.lerp(this.droneMesh.position, a);
+            rig.quaternion.slerp(this.droneMesh.quaternion, a);
+        }
     }
 
     render() {

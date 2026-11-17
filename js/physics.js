@@ -1,7 +1,7 @@
 // physics.js - Handles Cannon-es physics environment and drone simulation
 
 import * as CANNON from 'cannon-es';
-import { Hummingbird, BIRD_STATE } from './hummingbird/hummingbird.js?v=34';
+import { Hummingbird, BIRD_STATE } from './hummingbird/hummingbird.js?v=35';
 
 // The hummingbird lives in flappy's axes - x forward, y left, z up - and the renderer in three's -
 // forward -Z, right +X, up +Y. C takes a flappy vector to a three one: (x, y, z) -> (-y, z, -x).
@@ -65,6 +65,10 @@ export class PhysicsEngine {
                 yaw: true,
                 strength: 0.1 // 0..1, scaled by windMaxTorque below
             },
+            // Hummingbird only: the most the sticks can move its target, sideways and up/down, in m/s.
+            // Trained on 0.15 m/s, it measurably follows up to 2 m/s; what limits it is how hard the
+            // target may accelerate (Hummingbird.maxAccel), not its top speed.
+            birdSpeed: 1.0,
             rates: {
                 roll: { center: 200, max: 600, expo: 0.5 },
                 pitch: { center: 200, max: 600, expo: 0.5 },
@@ -188,6 +192,7 @@ export class PhysicsEngine {
         this.bird = null;
         this._birdLoad = null;
         this._birdScratch = { p: new Float64Array(3), v: new Float64Array(3), m: new Float64Array(9) };
+        this._birdAvg = { n: 0, p: new Float64Array(3), q: new Float64Array(4) };
 
         // Apply continuous forces per physics sub-step using World events
         // This is guaranteed to run before every single internal integration step.
@@ -536,6 +541,10 @@ export class PhysicsEngine {
             this.droneBody.updateMassProperties();
         }
         if (config.thrust !== undefined) this.params.maxThrust = config.thrust;
+        if (config.birdSpeed !== undefined) {
+            this.params.birdSpeed = Math.max(0.05, config.birdSpeed);
+            this.applyBirdSpeed();
+        }
         if (config.thrustCurve !== undefined) {
             this.params.thrustCurve = Math.min(1, Math.max(0, config.thrustCurve));
         }
@@ -579,19 +588,26 @@ export class PhysicsEngine {
                 return r.json();
             });
             this._birdLoad = Promise.all([
-                get('models/hummingbird/robot.json?v=34'),
-                get('models/hummingbird/ppo2new_4M.json?v=34')
+                get('models/hummingbird/robot.json?v=35'),
+                get('models/hummingbird/ppo2new_4M.json?v=35')
             ]).then(([robot, policy]) => {
                 this.bird = new Hummingbird(robot, policy, {
                     groundAt: (x, y, z) => this.birdGroundAt(x, y, z),
                     collides: (p, r) => this.birdCollides(p, r)
                 });
+                this.applyBirdSpeed();
             }).catch((err) => {
                 this._birdLoad = null; // let a failed load be retried
                 throw err;
             });
         }
         return this._birdLoad;
+    }
+
+    applyBirdSpeed() {
+        if (!this.bird) return;
+        this.bird.maxSpeed = this.params.birdSpeed;
+        this.bird.maxClimb = this.params.birdSpeed;
     }
 
     setVehicle(vehicle) {
@@ -859,8 +875,30 @@ export class PhysicsEngine {
         up = Math.abs(up) < deadband ? 0 : Math.sign(up) * (Math.abs(up) - deadband) / (1 - deadband);
         this.bird.setSticks(-a.pitch, a.roll, up, a.yaw);
         this.bird.setArmed(this.isArmed);
-        this.bird.advance(dt);
+
+        // The torso rocks with every wingbeat, 34 times a second. Shown as sampled once per frame
+        // that aliases into a slow wobble (34 Hz seen at 60 fps looks like 26 Hz, at 30 fps like 4),
+        // so the drone body is given the bird's pose averaged over the control periods the frame
+        // covered. The wings themselves are drawn at their instantaneous angles (getBirdState).
+        const body = this.droneBody, avg = this._birdAvg;
+        avg.n = 0;
+        avg.p.fill(0);
+        avg.q.fill(0);
+        this.bird.advance(dt, 0.05, () => {
+            this.syncBird();
+            const q = body.quaternion, p = body.position;
+            // keep every sample in the same hemisphere as the first, or opposite signs cancel out
+            const s = avg.n > 0 && q.x * avg.q[0] + q.y * avg.q[1] + q.z * avg.q[2] + q.w * avg.q[3] < 0 ? -1 : 1;
+            avg.q[0] += s * q.x; avg.q[1] += s * q.y; avg.q[2] += s * q.z; avg.q[3] += s * q.w;
+            avg.p[0] += p.x; avg.p[1] += p.y; avg.p[2] += p.z;
+            avg.n++;
+        });
         this.syncBird();
+        if (avg.n > 0) {
+            body.position.set(avg.p[0] / avg.n, avg.p[1] / avg.n, avg.p[2] / avg.n);
+            body.quaternion.set(avg.q[0], avg.q[1], avg.q[2], avg.q[3]);
+            body.quaternion.normalize();
+        }
     }
 
     getDroneState() {
