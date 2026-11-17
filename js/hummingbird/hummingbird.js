@@ -19,8 +19,8 @@
 // motion-capture system. Here it gets the true state, which flies as well or better on the standard
 // robot (measured in flappy: moving and takeoff 30/30 both ways, errors equal or lower).
 
-import { Flapper } from './flapper.js?v=35';
-import { Policy, flappyRotation, actionToVoltages } from './policy.js?v=35';
+import { Flapper } from './flapper.js?v=36';
+import { Policy, flappyRotation, actionToVoltages } from './policy.js?v=36';
 
 export const BIRD_STATE = {
     LANDED: 'landed', // sitting on the ground, held there; wings flap while armed
@@ -38,9 +38,11 @@ export class Hummingbird {
 
         // Pilot command limits. The controller was trained on targets moving at up to 0.15 m/s
         // sideways and climbing at up to 0.3 m/s, but measured here it follows far faster: forward,
-        // sideways, up, down and stick reversals all without a crash up to 2 m/s, about 4 cm behind
-        // at 1 m/s and 6 cm at 2 m/s. What breaks it is acceleration: at 2 m/s^2 a sharp reversal
-        // flips it, so the target's speed follows the stick at maxAccel and no faster.
+        // sideways, up, down and stick reversals all without a crash up to 3 m/s, about 4 cm behind
+        // at 1 m/s, 6 cm at 2 and 8-9 cm at 3. Above that it tops out near 3.5 m/s horizontally and
+        // full-speed sideways flight flips it; vertical stays steady at any speed. What breaks it
+        // first is acceleration: at 2 m/s^2 a sharp reversal flips it even at 1 m/s, so the target's
+        // speed follows the stick at maxAccel and no faster.
         this.maxSpeed = options.maxSpeed ?? 1.0; // m/s, horizontal, full stick
         this.maxClimb = options.maxClimb ?? 1.0; // m/s, vertical, full stick
         this.maxAccel = options.maxAccel ?? 1.0; // m/s^2, how fast the target's speed follows the stick

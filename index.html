@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TurtleMode Simulator</title>
-    <link rel="stylesheet" href="css/style.css?v=35">
+    <link rel="stylesheet" href="css/style.css?v=36">
     <!-- Import maps for ES modules. These resolve to vendored copies under vendor/, not to a CDN:
          the sim has to work offline and must not go dark when unpkg does. Versions are pinned by
          what is committed there, so bumping a dependency means replacing the file (see
@@ -47,9 +47,9 @@
                     <p class="small-text" style="text-align: left;">The sticks don't fly it directly &ndash; they move the point the controller chases. <strong>Throttle</strong> climbs or descends, and the centre holds height. <strong>Pitch/Roll</strong> move it forward, back and sideways at up to the top speed below. <strong>Yaw</strong> turns it, about 35&deg;/s. Arm, then push the throttle up to take off; bring it down gently to land. Touching anything in flight is a crash &ndash; press <strong>R</strong>.</p>
                     <div class="slider-group">
                         <label for="cfg-bird-speed">Top Speed: <span id="val-bird-speed">1.0</span> m/s</label>
-                        <input type="range" id="cfg-bird-speed" min="0.2" max="2" step="0.1" value="1">
+                        <input type="range" id="cfg-bird-speed" min="0.2" max="5" step="0.1" value="1">
                     </div>
-                    <p class="small-text" style="text-align: left;">Full stick, sideways and up/down alike. The controller was trained on 0.15 m/s but follows the target up to 2 m/s, a few centimetres behind; faster than that it starts to lose it.</p>
+                    <p class="small-text" style="text-align: left;">Full stick, sideways and up/down alike. The controller was trained on 0.15 m/s but follows the target up to about 3 m/s, under 10 cm behind. Past that the bird tops out around 3.5 m/s sideways, trails its target, and full-speed sideways flight can flip it; climbing and descending stay steady at any setting.</p>
                     <p class="small-text" style="text-align: left; margin-bottom: 0;">Keyboard: W/S climb/descend, I/K forward/back, J/L left/right, A/D turn, space to arm. In Line of Sight and Chase a blue dot marks the target.</p>
                 </div>
             </div>
@@ -332,6 +332,6 @@
         </div>
     </div>
 
-    <script type="module" src="js/main.js?v=35"></script>
+    <script type="module" src="js/main.js?v=36"></script>
 </body>
 </html>

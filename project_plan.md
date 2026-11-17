@@ -46,7 +46,7 @@ hummingbird's modules and the two model files it fetches carry a `?v=N` cache-bu
 running build is logged to the console and shown in the launch menu. All eighteen tags and the
 `BUILD` constant must agree, so they are bumped by tool rather than by hand
 — `node tools/bump-version.mjs`, with `--check` to verify they have not drifted. **The current
-build is `v35`.** `index.html` itself is not versioned, so a browser holding a stale copy of it will
+build is `v36`.** `index.html` itself is not versioned, so a browser holding a stale copy of it will
 keep requesting the old module versions — check the build stamp before debugging anything that looks
 like an unapplied change.
 
@@ -283,10 +283,12 @@ A second practice vehicle: Purdue's flapping-wing robot from the *flappy* simula
 - **Piloting** is through the controller: the sticks move the point it chases. Throttle climbs and
   descends with the centre holding height; pitch and roll move it; yaw turns it at about 35°/s by
   turning the world it is shown, never more than 17° ahead of where it points.
-- **Top speed**, sideways and vertical alike: 1 m/s by default, 0.2–2 m/s on a slider. The
-  controller was trained on 0.15 m/s, but measured here it follows up to 2 m/s with no crashes
-  (about 4 cm behind at 1 m/s, 6 cm at 2 m/s) as long as the target's speed changes no faster than
-  1 m/s² — at 2 m/s² a sharp reversal flips it.
+- **Top speed**, sideways and vertical alike: 1 m/s by default, 0.2–5 m/s on a slider. The
+  controller was trained on 0.15 m/s, but measured here it follows up to about 3 m/s with no crashes
+  (about 4 cm behind at 1 m/s, 6 cm at 2, 8–9 cm at 3) as long as the target's speed changes no
+  faster than 1 m/s² — at 2 m/s² a sharp reversal flips it. Past 3 m/s the bird tops out near
+  3.5 m/s horizontally and sustained full-speed sideways flight flips it; climbs and descents are
+  steady at any setting.
 - **Takeoff and landing.** It starts sitting on the ground under the spawn and lifts off when the
   throttle goes up. On the way down the target brakes in time to stop at the ground — at most
   √(2·0.4 m/s²·height) — and eases in over the last few centimetres, so a landing works from any

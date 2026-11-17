@@ -1,6 +1,6 @@
 // ui.js - Handles DOM interactions and Menus
 
-import { TRACKS, DEFAULT_TRACK, formatTime } from './tracks.js?v=35';
+import { TRACKS, DEFAULT_TRACK, formatTime } from './tracks.js?v=36';
 
 // Flight views, in the order 'C' cycles through them
 const CAMERA_MODES = ['fpv', 'chase', 'los'];

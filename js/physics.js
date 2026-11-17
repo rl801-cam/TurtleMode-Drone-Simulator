@@ -1,7 +1,7 @@
 // physics.js - Handles Cannon-es physics environment and drone simulation
 
 import * as CANNON from 'cannon-es';
-import { Hummingbird, BIRD_STATE } from './hummingbird/hummingbird.js?v=35';
+import { Hummingbird, BIRD_STATE } from './hummingbird/hummingbird.js?v=36';
 
 // The hummingbird lives in flappy's axes - x forward, y left, z up - and the renderer in three's -
 // forward -Z, right +X, up +Y. C takes a flappy vector to a three one: (x, y, z) -> (-y, z, -x).
@@ -65,9 +65,11 @@ export class PhysicsEngine {
                 yaw: true,
                 strength: 0.1 // 0..1, scaled by windMaxTorque below
             },
-            // Hummingbird only: the most the sticks can move its target, sideways and up/down, in m/s.
-            // Trained on 0.15 m/s, it measurably follows up to 2 m/s; what limits it is how hard the
-            // target may accelerate (Hummingbird.maxAccel), not its top speed.
+            // Hummingbird only: the most the sticks can move its target, sideways and up/down, in m/s
+            // (slider 0.2-5). Trained on 0.15 m/s, it measurably follows up to about 3 m/s; past that
+            // it tops out near 3.5 m/s horizontally and sustained full-speed sideways flight flips it.
+            // Vertical is fine at any setting. The limit that matters more is how hard the target may
+            // accelerate (Hummingbird.maxAccel).
             birdSpeed: 1.0,
             rates: {
                 roll: { center: 200, max: 600, expo: 0.5 },
@@ -588,8 +590,8 @@ export class PhysicsEngine {
                 return r.json();
             });
             this._birdLoad = Promise.all([
-                get('models/hummingbird/robot.json?v=35'),
-                get('models/hummingbird/ppo2new_4M.json?v=35')
+                get('models/hummingbird/robot.json?v=36'),
+                get('models/hummingbird/ppo2new_4M.json?v=36')
             ]).then(([robot, policy]) => {
                 this.bird = new Hummingbird(robot, policy, {
                     groundAt: (x, y, z) => this.birdGroundAt(x, y, z),

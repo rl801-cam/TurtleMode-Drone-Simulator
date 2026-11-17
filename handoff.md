@@ -156,10 +156,12 @@ in flappy's axes inside a group carrying the same rotation, so joint offsets and
 are the robot's own numbers.
 
 **Piloting.** The sticks never touch the motors. They move the *target* - the point the controller
-chases - at up to `params.birdSpeed`, 1 m/s by default and 0.2-2 m/s on the Top Speed slider
+chases - at up to `params.birdSpeed`, 1 m/s by default and 0.2-5 m/s on the Top Speed slider
 (throttle up/down with the centre holding height, pitch/roll forward/sideways), and turn its
-heading at 0.6 rad/s. The controller was trained on 0.15 m/s targets but follows up to 2 m/s;
-the target's *acceleration* is what has to stay gentle (`maxAccel`, 1 m/s^2). Turning works by rotating the world the
+heading at 0.6 rad/s. The controller was trained on 0.15 m/s targets but follows up to about
+3 m/s; above that the bird itself tops out near 3.5 m/s horizontally and full-speed sideways flight
+flips it, while climbs and descents hold at any setting. The target's *acceleration* is what has to
+stay gentle (`maxAccel`, 1 m/s^2). Turning works by rotating the world the
 controller is shown: it was trained to hold yaw at zero, so the target heading is kept within 0.3 rad
 of where the bird actually points. The target is leashed to 25 cm from the bird and never goes below
 the ground. Takeoff and crashes follow flappy's `Floor` rules (held on the ground until the target
@@ -478,7 +480,7 @@ node tools/bump-version.mjs 42        # set an explicit version
 node tools/bump-version.mjs --check   # print the current version, or exit 1 if files disagree
 ```
 
-**Current build: `v35`** — the tags live in `index.html` (stylesheet and the `main.js` script), the
+**Current build: `v36`** — the tags live in `index.html` (stylesheet and the `main.js` script), the
 import list at the top of `main.js`, the `tracks.js` import in `ui.js`, the hummingbird import and
 its two model-file URLs in `physics.js`, the hummingbird modules' imports of each other, and the
 `BUILD` constant in `main.js`. A new tagged import in any other file has to be added to `FILES` in
@@ -562,8 +564,8 @@ deliberately updated, and their URLs change with it.
     landing and crash rules, a model with flapping wings, a head-mounted FPV camera and a closer
     Line of Sight viewpoint with a target marker. The first part of the project with a committed
     test. See *How the hummingbird works* and invariants 33-36.
-20. **Faster bird, steadier cameras** (v35). The bird's top speed went from 0.2 to 1 m/s, with a
-    0.2-2 m/s slider, after measuring how fast the controller can really follow; the landing flare
+20. **Faster bird, steadier cameras** (v35-v36). The bird's top speed went from 0.2 to 1 m/s, with a
+    0.2-5 m/s slider, after measuring how fast the controller can really follow; the landing flare
     became a braking profile so landings survive fast descents. The bird's FPV camera is smoothed
     (frame-averaged pose plus a low-pass on a camera rig), and a Chase view joined FPV and Line of
     Sight for both vehicles. See invariants 37-38.
@@ -719,8 +721,9 @@ gap that matters most.
       per episode, and the controller was trained on that; the browser flies the nominal robot.
     * *Wind, contacts and sound.* No wind acts on the bird, a touch in flight is a crash rather than
       a bounce, and it is silent (the motor audio is a quad's props, so it is gated off).
-    * *Its controller's limits.* It was trained on 0.15 m/s; everything up to the 2 m/s slider limit
-      was measured here rather than trained for, and it falls behind faster than that. It holds
+    * *Its controller's limits.* It was trained on 0.15 m/s; everything faster was measured here
+      rather than trained for. It follows to about 3 m/s; on the slider's top end (3-5 m/s) it
+      trails its target and full-speed sideways flight can flip it. It holds
       height about 2 cm low and recovers unreliably from large tilts.
     * *Self-collision.* DART checked the wings against the torso; the port does not. It never
       mattered in the reference flights.

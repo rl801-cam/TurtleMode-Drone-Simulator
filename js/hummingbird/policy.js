@@ -16,7 +16,7 @@
 // voltage bias and split cycle, each scaled from [-1, 1] to its range, turned into two flapping
 // waveforms by controlSignal().
 
-import { controlSignal } from './flapper.js?v=35';
+import { controlSignal } from './flapper.js?v=36';
 
 export class Policy {
     constructor(json) {
