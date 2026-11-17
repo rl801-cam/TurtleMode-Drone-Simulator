@@ -28,10 +28,16 @@
 
 // Racing runs to a fixed spec so every lap on the leaderboard was flown on the same machine
 // in the same air. These override whatever the practice sliders are set to.
+//
+// Changing anything here that alters how fast a lap can be flown - or changing the flight model
+// in physics.js - makes the existing boards meaningless. Bump BOARD_REVISION in race.js when you
+// do, and update the spec sheet printed in index.html by hand.
 export const RACE_SPEC = {
     mass: 0.5,
     thrust: 25,
-    drag: 0.5,
+    thrustCurve: 0.6,
+    propPitchSpeed: 60,
+    drag: 1.0,
     restitution: 0.2,
     friction: 0.2,
     // Dead calm - a drifting breeze would make two laps incomparable

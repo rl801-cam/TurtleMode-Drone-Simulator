@@ -234,8 +234,10 @@ export class AudioEngine {
         if (!enabled) this.silence();
     }
 
-    // Normalised thrust, 0..1. Thrust is throttle * maxThrust, so the normalised value is just
-    // the throttle command. Disarmed motors are not turning, so they make no sound.
+    // Normalised motor speed, 0..1. An ESC drives RPM roughly in step with the throttle command -
+    // it is thrust, going as RPM squared, that bends (see thrustCurve in physics.js) - so the
+    // normalised value is just the throttle command. Disarmed motors are not turning, so they
+    // make no sound.
     level(thrust, armed) {
         if (!armed) return 0;
         if (!Number.isFinite(thrust)) return 0;

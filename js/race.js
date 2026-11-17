@@ -18,9 +18,16 @@ const LEADERBOARD_SHOWN = 10;
 // direction of travel. Shared and never mutated.
 const TORUS_AXIS = new THREE.Vector3(0, 0, 1);
 
+// Bumped whenever the flight model or RACE_SPEC changes enough that a lap flown before cannot be
+// compared with one flown after. Each revision gets a board of its own; older boards are left in
+// localStorage untouched, so nothing is lost, but they are no longer shown.
+//   r1 (bare key)  linear damping, thrust linear in throttle - up to v30
+//   r2             quadratic airframe drag, rotor drag, thrust curve and prop pitch speed - v31
+const BOARD_REVISION = 2;
+
 export class Leaderboard {
     constructor(trackId) {
-        this.key = `turtlemode.leaderboard.${trackId}`;
+        this.key = `turtlemode.leaderboard.r${BOARD_REVISION}.${trackId}`;
     }
 
     entries() {

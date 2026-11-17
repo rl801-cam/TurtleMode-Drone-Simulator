@@ -54,13 +54,14 @@ the airframe to a fixed spec and times laps round a gated course, with a persist
   rasteriser for previews. Nothing here is loaded by the page.
 
 ### Default configuration
-Mass `0.5 kg` · Max thrust `25 N` (~5:1 TWR, hover near 20% throttle) · Air drag `0.5` ·
-Restitution `0.2` · Surface grip `0.2` · Wind `0.1` on all three axes · Video latency `0 ms` ·
-Camera uptilt `10°` · Default map `Bando`.
+Mass `0.5 kg` · Max thrust `25 N` (~5:1 TWR, hover near 33% throttle) · Thrust curve `0.6` ·
+Prop pitch speed `60 m/s` · Air drag `1.0×` · Restitution `0.2` · Surface grip `0.2` · Wind `0.1`
+on all three axes · Video latency `0 ms` · Camera uptilt `10°` · Default map `Bando`.
 
 Defaults live in **three places that must agree**: `params` in `physics.js`, the `value=`
 attributes plus readout spans in `index.html`, and `RACE_SPEC` in `tracks.js` — which is also
-printed as a spec sheet in the launch menu, in a fourth place, by hand.
+printed as a spec sheet in the launch menu, in a fourth place, by hand. Changing `RACE_SPEC` or
+the flight model also means bumping `BOARD_REVISION` in `race.js` (invariant 32).
 
 ### What persists
 `localStorage` holds camera mode, LOS zoom, camera uptilt, speed readout, audio, game mode,
@@ -73,12 +74,57 @@ Cannon-es integrates the rigid body, but **its narrowphase is not used**. There 
 and no `Trimesh`; map geometry is merged into a single BVH and contacts are resolved by hand in a
 `postStep` listener. The flow per sub-step (fixed 120 Hz):
 
-1. `preStep` — thrust, rate-controller torque, and wind are applied. This is what makes flight
-   framerate-independent: forces go in immediately before each internal integration step rather
-   than once per rendered frame.
+1. `preStep` — air drag is applied always; thrust, rate-controller torque and wind only when
+   armed. This is what makes flight framerate-independent: forces go in immediately before each
+   internal integration step rather than once per rendered frame.
 2. Cannon integrates.
 3. `postStep` — `resolveCollisions()` runs continuous collision detection, gathers contacts,
    corrects penetration, and applies impulses.
+
+### The flight model
+
+**Thrust** (`computeThrust()`) is built in two stages. The *static* thrust — what the props push
+hovering in still air — is `maxThrust × ((1 − c)·t + c·t²)` for throttle `t` and thrust curve `c`.
+An ESC drives RPM roughly in step with the throttle and thrust goes as RPM², which would make it
+pure `t²`; a loaded motor sags at the top end, so real setups sit in between. `c = 0.6` hovers the
+default 5:1 airframe at 33% throttle, where real quads hover. The prop RPM fraction is then
+`√(static fraction)`. Second, **thrust fades with inflow**: the component of velocity along the
+thrust axis (climbing, or leaning into a fast run) means each blade meets the air at a shallower
+angle, so thrust falls linearly to zero at `propPitchSpeed × rpmFraction`. That fall-off, not
+drag, is what sets top speed and climb rate. Descending (negative inflow) gets plain static
+thrust: momentum theory would give a little back and vortex ring state would take more away, and
+both belong with prop wash and per-motor thrust.
+
+**Drag** (`applyAirDrag()`) is two forces, resolved in body axes and applied at the centre of
+mass, both scaled by the *Air Drag* slider:
+
+* **Airframe drag**, `−½ρ|v|·CdAᵢ·vᵢ` per body axis, with `dragAreas` of 0.009 (side), 0.025
+  (top) and 0.008 m² (nose). The areas differ several-fold, so drag is not simply opposite the
+  velocity — a quad sliding while leaning is pushed up and back as well as back.
+* **Rotor drag**, `−rotorDrag × rpmFraction × vᵢ` on the two in-plane axes only. A spinning prop
+  meeting air edgeways pushes back against it. It is linear in speed and zero when disarmed, and
+  at low speed it dominates: without it, levelling out at hover drifts on like ice, because
+  quadratic drag is almost nothing at walking pace. `0.45` gives about 0.4 s⁻¹ of deceleration
+  at hover, in line with published rotor-drag measurements on real quads.
+
+Cannon's `linearDamping` is **0**. It removed a fixed fraction of velocity per second — linear,
+identical in every direction — and was what let the old 5:1 airframe reach 255 km/h and climb at
+58 m/s. `angularDamping` is fixed at `0.5`, the value the crash solver was tuned with, and is no
+longer tied to the drag slider.
+
+What the default airframe does, measured headlessly against the shipped `physics.js`:
+
+| | Before (v30) | Now (v31) |
+| --- | --- | --- |
+| Hover throttle | 19.6% | 32.9% |
+| Top speed, holding altitude | 71 m/s (255 km/h) at 78° lean | 29 m/s (103 km/h) at 73° lean |
+| Full-throttle vertical climb | 58 m/s | 25 m/s |
+| Punch-out to 20 m | 1.12 s | 1.27 s |
+| Terminal velocity, belly / nose first | 14 / 14 m/s | 18 / 32 m/s |
+| Level out at hover, 10 → 2 m/s | 2.3 s, 11.5 m | 3.6 s, 17.5 m |
+
+Landing and settling are unchanged: a flat drop, tilted drop, sliding landing and a 15 m/s crash
+all come to rest (|v| < 0.02 m/s, |ω| < 0.05 rad/s, disarmed) as before.
 
 ## How racing works
 
@@ -109,10 +155,12 @@ machine posts systematically different laps from a 60 Hz one.
 them with `consumeEvents()` each frame, turning them into HUD toasts and a leaderboard re-render.
 `race.js` therefore never touches the menus.
 
-**The leaderboard is `localStorage`**, one key per track (`turtlemode.leaderboard.<trackId>`),
-one row per pilot holding their fastest lap, 25 stored and 10 shown. It is read defensively — a
-hand-edited or half-written store is filtered rather than trusted. It is also per-browser, so
-"track record" means this browser's record.
+**The leaderboard is `localStorage`**, one key per track and board revision
+(`turtlemode.leaderboard.r<N>.<trackId>`), one row per pilot holding their fastest lap, 25 stored
+and 10 shown. It is read defensively — a hand-edited or half-written store is filtered rather than
+trusted. It is also per-browser, so "track record" means this browser's record. The revision is
+`BOARD_REVISION` in `race.js`; revision 1 used the bare `turtlemode.leaderboard.<trackId>` key, and
+those boards are still in storage, just no longer shown (invariant 32).
 
 `clearTrack()` disposes the ring geometry, the ring material, and both the sprite material and its
 canvas texture. Labels are canvas textures, so dropping the group without disposing them leaks a
@@ -308,6 +356,23 @@ Each of these was found the hard way. They are load-bearing.
     the OSD. The keyboard flight fallback used to bind the same keys to pitch and roll, so an arrow
     press did both at once; pitch and roll are on **I/K** and **J/L** now. Anything new wanting the
     arrows has to take them from the camera first, and update both strings in `index.html`.
+30. **`linearDamping` stays at zero, and `drag` is a scale, not a damping.** Drag is a force in
+    `applyAirDrag()`; turning Cannon's damping back on would apply drag twice, once of the wrong
+    shape. `params.drag` used to be the damping coefficient (default `0.5`) and is now a multiplier
+    on both drag terms (default `1.0`), so anything still passing `drag: 0.5` — an old test
+    harness, say — is now flying in half the air. `angularDamping` is a separate constant
+    (`0.5`) because the crash solver was tuned against it; do not reattach it to the slider.
+31. **Drag runs whether or not the drone is armed; rotor drag and thrust do not.** A disarmed
+    drone falling out of the sky still moves through air, but its props have stopped, so the rotor
+    term goes to zero with `rpmFraction()`. Both use the live body velocity, never the delayed
+    video pose (invariant 14), and both share `_aero` scratch rather than the contact solver's
+    `_scratch`, so their order relative to `postStep` is not load-bearing.
+32. **Any change that alters lap times needs a new board revision.** That covers `RACE_SPEC` and
+    the flight model itself — drag, thrust, rates, mass handling. Bump `BOARD_REVISION` in
+    `race.js` and add a line to the comment above it saying what changed. Each revision has its own
+    `localStorage` key, so nothing is deleted and an old build still finds its own board, but times
+    flown under different physics never share a table. Revision 2 came with the v31 flight model:
+    a lap set at 255 km/h top speed would otherwise sit at the top of the board for good.
 
 ## Caching — read this before debugging "my change did nothing"
 
@@ -326,7 +391,7 @@ node tools/bump-version.mjs 42        # set an explicit version
 node tools/bump-version.mjs --check   # print the current version, or exit 1 if files disagree
 ```
 
-**Current build: `v30`** — the tags live in `index.html` (stylesheet and the `main.js` script), the
+**Current build: `v31`** — the tags live in `index.html` (stylesheet and the `main.js` script), the
 import list at the top of `main.js`, the `tracks.js` import in `ui.js`, and the `BUILD` constant in
 `main.js`. `--check` exits non-zero if they have drifted apart, which is worth running before
 committing.
@@ -392,6 +457,14 @@ deliberately updated, and their URLs change with it.
       feedback whatsoever. The Start button now shows a percentage, then `Building Collision...`
       during the BVH build — which needs two `requestAnimationFrame`s before it, or the message
       never reaches the glass ahead of the blocking work it is announcing.
+17. **Realistic air drag and a thrust curve** (v31). Cannon's linear damping replaced by
+    quadratic, direction-dependent airframe drag plus rotor drag; thrust given a curve against the
+    throttle and a fall-off with airspeed through the props. Top speed came down from 255 to
+    103 km/h, vertical climb from 58 to 25 m/s, hover moved from 20% to 33% throttle, and the
+    drone now falls faster belly first than it used to and much faster nose first. Two new
+    practice sliders (*Thrust Curve*, *Prop Pitch Speed*), *Air Drag* re-scaled to a multiplier,
+    the spec class updated to match, and the leaderboards moved to revision 2. See *The flight
+    model* and invariants 30–32.
 
 ## Verification
 
@@ -400,7 +473,16 @@ driven headlessly under Node — against synthetic collision callbacks and a stu
 respectively. Seven harnesses, **165 checks**, covering landing and settling, wall and corner
 strikes, restitution accuracy, friction, wedged contacts, tunnelling at racing speed, wind gating,
 the audio mapping, video-link delay, and the camera uptilt convention. All passed when they were
-written.
+written — against the v30 flight model. They predate the drag rewrite, and any of them that pass
+`drag: 0.5` or assume linear damping needs updating before it is trusted again (invariant 30).
+
+The v31 flight model was checked the same way, by a harness that rewrites the shipped
+`physics.js`'s `cannon-es` import to the vendored file and flies it against a synthetic floor: hover
+throttle by bisection, terminal velocity belly and nose first, full-throttle speed and climb rate
+at every lean from 30° to 89°, a punch-out, coast-downs disarmed and at hover, and the four landing
+cases plus an armed idle on the floor. Those numbers are the table under *The flight model*. The
+same figures were then reproduced in the browser by stepping `window.simulator.physics` directly
+on the placeholder map with the real collider. That harness is not committed either.
 
 Every harness reads the **shipped** file and none keeps a copy — a stale copy asserts against code
 that no longer exists, and one here produced four false results before it was caught. Two details
@@ -448,7 +530,9 @@ gap that matters most.
 2. **Commit the test harnesses**, and write one for `race.js` (see Verification).
 3. **Per-motor thrust.** Thrust is a single force at the centre of mass. Four forces at the arm
    positions would unlock motor spool-up lag (thrust is instantaneous today), differential yaw
-   authority, and prop wash.
+   authority, and prop wash — including the descent effects `computeThrust()` deliberately leaves
+   out (see *The flight model*). Each motor would take the same curve and inflow fall-off, with
+   its own inflow.
 4. **Turtle mode.** Flipping an inverted drone by reversing two motors — the feature the project is
    named for, and still absent. Depends on per-motor thrust.
 5. **Spawn and crash flow.** Spawn points exist, but practice is still hard-coded to `(0, 1, 0)` in
@@ -465,7 +549,7 @@ gap that matters most.
    rule left to implement at the gate itself, since a gate no longer has a right way through; any
    future wrong-way detection would have to work off the drone's progress round the course instead.
    The board is per-browser `localStorage`, so "track record" means this browser's record.
-10. **Map download size and draw load.** `rift-quarry.glb` is 49.6 MB against bando's 43.6 MB, and
+9. **Map download size and draw load.** `rift-quarry.glb` is 49.6 MB against bando's 43.6 MB, and
     both are uncompressed on disk — but **that is not what goes over the wire**. GitHub Pages
     gzips them at the edge, measured at 43.6 MB → 7.5 MB for bando (`Content-Encoding: gzip`,
     `Content-Length: 7472165`). These files are mostly float32 vertex attributes and compress
@@ -481,11 +565,26 @@ gap that matters most.
     generator), and the terrain is split into 8×8 tiles per material specifically so Three.js can
     frustum-cull it. Left as one sheet the ground was submitted whole every frame, and again for
     the shadow map. There is no LOD and no occlusion culling on either map.
-9. **Gate detection samples once per rendered frame**, off a straight segment between positions,
+10. **Gate detection samples once per rendered frame**, off a straight segment between positions,
    rather than per physics sub-step. It cannot miss a plane, but the straight-line approximation
    coarsens on a tight arc through a 0.62 m ring at a low frame rate. Related: the off-screen gate
    pointer is computed in `updateRace()` *before* `renderer.updateDrone()`, so it trails the
    rendered picture by exactly one frame.
+11. **What the v31 flight model still leaves out.**
+    * *Motor idle.* Zero throttle is zero thrust and zero RPM, so a chopped-throttle dive has no
+      rotor drag and no idle thrust. Betaflight in airmode keeps the props turning at a few percent;
+      an idle floor in `staticThrustFraction()` would add both, at the cost of a drone that never
+      quite stops pushing.
+    * *Wind as moving air.* The *Wind* setting is still a disturbance torque. Drag is already
+      computed against still air in body axes, so a real wind is one subtraction in
+      `applyAirDrag()` — body velocity minus air velocity — and the drone would drift while
+      hovering as a real one does. Inflow in `computeThrust()` should use the same relative velocity.
+    * *Centre of pressure.* Drag acts at the centre of mass, so it never turns the airframe — no
+      weathervaning into a fast run, no nose-heavy tumble when falling disarmed.
+    * *Battery sag.* Static thrust is the same on the first lap as the tenth.
+    * *Coefficients are representative, not measured.* The drag areas, rotor drag and pitch speed
+      are sized for a generic 5" quad and checked against the outcomes in the table above, not
+      fitted to a particular airframe.
 
 ---
 *End of Handoff Document*

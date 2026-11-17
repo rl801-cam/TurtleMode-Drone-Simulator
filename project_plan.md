@@ -40,7 +40,7 @@ hosted on GitHub Pages. Two modes: **Practice**, free flight with every paramete
 cache-busting tag, and the running build is logged to the console and shown in the launch menu.
 All twelve tags and the `BUILD` constant must agree, so they are bumped by tool rather than by hand
 — `node tools/bump-version.mjs`, with `--check` to verify they have not drifted. **The current
-build is `v28`.** `index.html` itself is not versioned, so a browser holding a stale copy of it will
+build is `v31`.** `index.html` itself is not versioned, so a browser holding a stale copy of it will
 keep requesting the old module versions — check the build stamp before debugging anything that looks
 like an unapplied change.
 
@@ -69,7 +69,24 @@ script and are the same fact as the table above.
   framerate-independent.
 - Betaflight-style "actual rates": centre sensitivity, max rate and expo, tunable per axis.
 - Angular rate held by a P-controller against the commanded rate, as a flight controller does.
-- Adjustable mass, max thrust and air drag.
+- **Thrust curve.** Static thrust follows `(1 − c)·t + c·t²` of the throttle: an ESC drives RPM
+  roughly in step with the stick and thrust goes as RPM², softened by a loaded motor's sag at the
+  top. The default `c = 0.6` hovers a 5:1 airframe at a third throttle, as a real one does.
+- **Thrust falls with airspeed through the props.** Climbing, or leaning into a fast run, sends air
+  through the disc along the thrust axis, and thrust fades linearly to nothing at the prop's pitch
+  speed (60 m/s at full RPM, scaling with RPM). This, more than drag, is what limits top speed and
+  climb rate.
+- **Air drag** is a force, not a damping. Airframe drag is quadratic with a separate drag area per
+  body axis — a quad is a flat plate from above and a slim one end on — so it falls belly first at
+  18 m/s and nose first at 32, and drag is not simply opposite the velocity. **Rotor drag**, linear
+  in speed and proportional to prop RPM, acts in the plane of the props: it dominates at low speed
+  and is what stops a levelled-out quad drifting on like ice.
+- What that adds up to on the default airframe: 103 km/h top speed holding altitude at a 73° lean,
+  25 m/s straight up, 0–20 m in 1.27 s, and a 10 m/s drift settling to 2 m/s over 17.5 m when
+  levelled out at hover. Before v31 the same airframe did 255 km/h and 58 m/s straight up, on
+  linear damping identical in every direction.
+- Adjustable mass, max thrust, thrust curve, prop pitch speed and air drag (a multiplier on both
+  drag terms).
 
 ### 3.3 Collision & Crash Physics
 Map geometry is merged into a single BVH on the main thread, and contacts are resolved by a custom
@@ -179,7 +196,8 @@ Both floor out rather than reaching silence. In FPV the listener rides the airfr
 is bypassed entirely.
 
 Prop rotation runs 55–260 Hz, putting the blade tone near 165–780 Hz and the chop at the same rate.
-Amplitude and frequency remain linear in the throttle command. Silent when disarmed or paused,
+Amplitude and frequency remain linear in the throttle command — RPM is what tracks the stick; it is
+thrust, going as RPM², that the thrust curve bends. Silent when disarmed or paused,
 smoothed to avoid clicks on stick movement, and toggleable from the pause menu. The context is
 created on the Start button's click, the user gesture browsers require before audio may play.
 
@@ -188,7 +206,8 @@ Timed laps round a gated course. Selecting Race loads the track's own map — th
 against that geometry and mean nothing anywhere else — moves the drone and the Line of Sight
 viewpoint to the start grid, and locks the airframe to a fixed spec.
 
-- **Spec class.** Mass, thrust, drag, restitution, grip, rates and video latency are all overridden,
+- **Spec class.** Mass, thrust, thrust curve, prop pitch speed, drag, restitution, grip, rates and
+  video latency are all overridden,
   and wind is switched off entirely: a drifting breeze would make two laps incomparable. Camera,
   controller mapping and display settings stay the pilot's own. The sheet is printed in the launch
   menu so it is clear what is being flown. Returning to Practice restores the pilot's own numbers
@@ -208,7 +227,11 @@ viewpoint to the start grid, and locks the airframe to a fixed spec.
   video feed.
 - **Leaderboard**, per track, in `localStorage`. One row per pilot holding their fastest lap, 25
   stored and 10 shown, with the board readable from the launch menu and the pause menu. A lap that
-  beats the stored record, the session best, or neither, gets a different toast.
+  beats the stored record, the session best, or neither, gets a different toast. Boards are
+  **revisioned**: a change to the spec or the flight model that alters lap times bumps
+  `BOARD_REVISION` in `race.js` and starts a fresh board, so laps flown under different physics
+  never share a table. Revision 2 came with the v31 drag and thrust model; the revision 1 boards
+  are still in storage, just no longer shown.
 - **HUD:** running lap time, lap number, next gate with its name and range, a pointer that swings to
   the next gate once it leaves the middle of the view, and last / best / record times. The next
   gate is lit and pulsing, gates already taken this lap fade back.
@@ -226,7 +249,7 @@ viewpoint to the start grid, and locks the airframe to a fixed spec.
 - **Mode switch:** Practice / Race, remembered between sessions. The launch and pause menus show
   only what applies to the current mode.
 - **Launch menu:** controller status and stick check, axis mapping, map selection, flight view,
-  drone config (mass, thrust, drag, restitution, grip), wind; in Race, track selection, pilot name,
+  drone config (mass, thrust, thrust curve, prop pitch speed, drag, restitution, grip), wind; in Race, track selection, pilot name,
   the spec sheet and the leaderboard.
 - **Pause menu:** per-axis rates tuning, FPS limiter, speed readout, motor audio; in Race, lap
   count, session best, track record and the board.
@@ -241,9 +264,9 @@ viewpoint to the start grid, and locks the airframe to a fixed spec.
   pixels of a 1× one, for a difference invisible at that density and well over half the framerate.
 
 ### 3.10 Default Configuration
-Mass `0.5 kg` · Max thrust `25 N` (~5:1 TWR, hover near 20% throttle) · Air drag `0.5` ·
-Restitution `0.2` · Surface grip `0.2` · Wind `0.1` on all three axes · Video latency `0 ms` ·
-Camera uptilt `10°` · Default map `Bando`.
+Mass `0.5 kg` · Max thrust `25 N` (~5:1 TWR, hover near 33% throttle) · Thrust curve `0.6` ·
+Prop pitch speed `60 m/s` · Air drag `1.0×` · Restitution `0.2` · Surface grip `0.2` · Wind `0.1`
+on all three axes · Video latency `0 ms` · Camera uptilt `10°` · Default map `Bando`.
 
 Racing uses the same numbers with wind off and latency pinned at zero.
 
@@ -257,7 +280,16 @@ headlessly under Node — against synthetic collision callbacks and a stubbed We
 respectively; `latency.js` needs no stubbing at all. Seven harnesses, **165 checks**, covering
 landing and settling, wall and corner strikes, restitution accuracy, friction, wedged contacts,
 tunnelling at racing speed, wind gating, the audio mapping, video-link delay, and the camera
-uptilt convention. All passed when they were written.
+uptilt convention. All passed when they were written — against the pre-v31 flight model, so any
+that pass `drag: 0.5` or lean on linear damping need revisiting (`drag` is now a multiplier and
+`0.5` means half the air).
+
+The v31 drag and thrust model was measured the same way, flying the shipped `physics.js` against
+a synthetic floor: hover throttle, terminal velocity belly and nose first, speed and climb at every
+lean from 30° to 89° at full throttle, a punch-out, coast-downs, and the landing and settling cases,
+which all still come to rest. The headline figures are in §3.2; the full before/after table is in
+[`handoff.md`](handoff.md) under *The flight model*. The figures were then reproduced in the
+browser against the real collider. This harness is not committed either.
 
 Every harness imports the **shipped** file — none keeps its own copy, and none falls back to one.
 A stale copy asserts against code that no longer exists, which is worse than not testing at all;
@@ -332,6 +364,9 @@ against those exact triangles.
 - **Dependencies vendored under `vendor/`** — the sim runs offline and no longer depends on unpkg.
 - **Version bumping automated** — `tools/bump-version.mjs` keeps all twelve cache tags in step.
 - Map disposal on swap, frame-pacing fix, capped render scale, and map load progress.
+- **Realistic air drag and a thrust curve** (v31) — quadratic, direction-dependent airframe drag
+  and rotor drag in place of linear damping; thrust curved against the throttle and fading with
+  airspeed through the props; leaderboards moved to a new revision so old and new laps never mix.
 
 ### Next
 1. **Persistent settings.** Camera, audio, mode, track, pilot name and the leaderboards persist;
@@ -340,7 +375,7 @@ against those exact triangles.
 2. **Commit the test harnesses**, and cover `race.js`, so the invariants stop relying on memory.
 3. **Per-motor thrust.** Thrust is currently a single force at the centre of mass. Four forces at
    the arm positions would unlock motor spool-up lag (thrust is instantaneous today), differential
-   yaw authority, and prop wash.
+   yaw authority, and prop wash. Each motor would reuse the v31 thrust curve and inflow fall-off.
 4. **Turtle mode.** Flipping an inverted drone by reversing two motors — the feature the project is
    named for. Depends on per-motor thrust.
 5. **Race depth.** Two tracks. Sector splits, a ghost or replay to chase, and something to do about
@@ -358,3 +393,7 @@ against those exact triangles.
    852 draw calls a frame, and again for the shadow map. Merging by material offline would cut that
    to 8. With transfer size already handled by edge gzip (§3.4), this is the biggest remaining
    rendering win on both maps; there is still no LOD and no occlusion culling.
+10. **The rest of the flight model.** Wind as moving air rather than a torque — drag is already
+    computed in body axes against still air, so it is one subtraction, and the drone would then
+    drift in a hover as a real one does. Motor idle, so a chopped-throttle dive keeps a little
+    thrust and its rotor drag. A centre of pressure, so drag can turn the airframe. Battery sag.

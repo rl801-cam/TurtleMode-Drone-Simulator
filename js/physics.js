@@ -13,8 +13,19 @@ export class PhysicsEngine {
         // Configurable Drone Parameters
         this.params = {
             mass: 0.5, // kg
+            // Static thrust at full throttle - what the four props push hovering in still air.
             maxThrust: 25, // Newtons (TWR of ~5:1 at the default mass)
-            drag: 0.5, // Linear & Angular dampening
+            // How static thrust follows the throttle command: 0 is a straight line, 1 is
+            // throttle squared. An ESC drives RPM roughly in step with the command and thrust
+            // goes as RPM squared, but a loaded motor sags at the top, so real setups land in
+            // between. 0.6 hovers a 5:1 quad at about a third throttle, as a real one does.
+            thrustCurve: 0.6,
+            // Air speed through the prop disc at which a full-throttle prop stops pushing - its
+            // pitch times its RPM, plus a little. Thrust falls away linearly towards it, which is
+            // what caps top speed and climb rate. Scales with RPM at part throttle.
+            propPitchSpeed: 60, // m/s
+            // Scale on the airframe's drag areas (dragAreas below). 1 = a typical 5" quad.
+            drag: 1.0,
             restitution: 0.2, // How much energy a frame/prop strike gives back
             friction: 0.2, // Coulomb friction coefficient at contact points
             wind: {
@@ -38,6 +49,33 @@ export class PhysicsEngine {
             quaternion: new CANNON.Quaternion(0, 0, 0, 1)
         };
 
+        // Aerodynamic drag is a real force, applied every sub-step by applyAirDrag(), in two parts.
+        //
+        // Airframe drag: half rho v squared times a drag area per body axis. A quad is a flat
+        // plate seen from above and a narrow one seen end on, so the areas differ several-fold -
+        // at the default mass it falls belly first at about 18 m/s and nose first at about 32.
+        this.airDensity = 1.225; // kg/m^3, sea level
+        this.dragAreas = {
+            x: 0.009, // side on, m^2 (Cd x A)
+            y: 0.025, // from above - frame, props, battery and the air they drag along
+            z: 0.008 // nose on
+        };
+        // Rotor drag: a spinning prop meeting air edgeways pushes back against it - the advancing
+        // blade sees more air than the retreating one. It is linear in speed, acts only in the
+        // plane of the props, and scales with prop RPM, and at low speed it is far larger than the
+        // airframe term: it is what stops a quad drifting on and on after you level out, where
+        // quadratic drag alone feels like ice. N per m/s of in-plane speed, at full RPM; at hover
+        // RPM on the default airframe it decelerates about 0.4 m/s^2 per m/s, the figure measured
+        // on real quads, so levelling out from 10 m/s drifts about 17 m before it is down to 2.
+        // Top speed hardly depends on it - the drone just leans further - prop pitch speed sets that.
+        this.rotorDrag = 0.45;
+        // Cannon's linearDamping is therefore off. It removes a fixed fraction of velocity per
+        // second - linear in speed, identical in every direction - which is not drag, and it was
+        // what used to let a 5:1 quad reach 255 km/h. Rotational damping is kept, at the value the
+        // crash solver was tuned against: armed, the rate controller swamps it; disarmed, it is
+        // part of what stops a tumbling airframe. It is no longer tied to the drag slider.
+        this.angularDamping = 0.5;
+
         // Create the drone body (Simplified Cuboid)
         const size = new CANNON.Vec3(0.15, 0.05, 0.15); // W, H, D
         this.droneShape = new CANNON.Box(size);
@@ -45,8 +83,8 @@ export class PhysicsEngine {
             mass: this.params.mass,
             shape: this.droneShape,
             position: this.spawn.position.clone(), // Start slightly above ground
-            linearDamping: this.params.drag,
-            angularDamping: this.params.drag
+            linearDamping: 0,
+            angularDamping: this.angularDamping
         });
         this.world.addBody(this.droneBody);
 
@@ -115,6 +153,8 @@ export class PhysicsEngine {
         // Apply continuous forces per physics sub-step using World events
         // This is guaranteed to run before every single internal integration step.
         this.world.addEventListener('preStep', () => {
+            // Armed or not: a disarmed drone falling out of the sky still moves through air
+            this.applyAirDrag();
             if (this.isArmed) {
                 if (this.currentAxes) this.applyInputsInternal(this.currentAxes);
                 this.applyWind();
@@ -180,6 +220,17 @@ export class PhysicsEngine {
             correction: new CANNON.Vec3(),
             tmpA: new CANNON.Vec3(),
             tmpB: new CANNON.Vec3()
+        };
+
+        // Scratch for the drag and thrust maths. Separate from the contact solver's set: these
+        // run in preStep, the solver in postStep, and sharing would make that ordering load-bearing.
+        this._aero = {
+            qInv: new CANNON.Quaternion(),
+            vLocal: new CANNON.Vec3(),
+            fLocal: new CANNON.Vec3(),
+            fWorld: new CANNON.Vec3(),
+            up: new CANNON.Vec3(),
+            unitY: new CANNON.Vec3(0, 1, 0)
         };
 
         this.lastTime = performance.now();
@@ -446,11 +497,14 @@ export class PhysicsEngine {
             this.droneBody.updateMassProperties();
         }
         if (config.thrust !== undefined) this.params.maxThrust = config.thrust;
-        if (config.drag !== undefined) {
-            this.params.drag = config.drag;
-            this.droneBody.linearDamping = config.drag;
-            this.droneBody.angularDamping = config.drag;
+        if (config.thrustCurve !== undefined) {
+            this.params.thrustCurve = Math.min(1, Math.max(0, config.thrustCurve));
         }
+        if (config.propPitchSpeed !== undefined) {
+            // Zero would divide by zero in computeThrust(); 1 m/s is already a prop that cannot fly
+            this.params.propPitchSpeed = Math.max(1, config.propPitchSpeed);
+        }
+        if (config.drag !== undefined) this.params.drag = Math.max(0, config.drag);
         if (config.restitution !== undefined) this.params.restitution = config.restitution;
         if (config.friction !== undefined) this.params.friction = config.friction;
         if (config.wind !== undefined) {
@@ -531,9 +585,81 @@ export class PhysicsEngine {
         this.droneBody.applyTorque(this.droneBody.quaternion.vmult(localTorque));
     }
 
+    // Static thrust as a fraction of maxThrust - what the props push hovering in still air.
+    staticThrustFraction(throttle) {
+        const t = Math.min(1, Math.max(0, Number.isFinite(throttle) ? throttle : 0));
+        const c = this.params.thrustCurve;
+        return (1 - c) * t + c * t * t;
+    }
+
+    // Prop speed as a fraction of full, 0 when disarmed. Thrust goes as RPM squared, so it is the
+    // square root of the static thrust fraction.
+    rpmFraction() {
+        if (!this.isArmed || !this.currentAxes) return 0;
+        return Math.sqrt(this.staticThrustFraction(this.currentAxes.throttle));
+    }
+
+    // Both drag terms against still air, resolved in body axes (see the constructor):
+    //   airframe  F_i = -1/2 rho |v| CdA_i v_i      on all three axes
+    //   rotor     F_i = -rotorDrag rpm v_i          on x and z only, the plane of the props
+    // Because the airframe areas differ, drag is not simply opposite the velocity - a quad
+    // sliding sideways while leaning is pushed up and back as well as back. The drag slider
+    // scales both. Applied at the centre of mass, so it adds no torque; weathervaning would need
+    // a centre of pressure, which this symmetric airframe has not got. There is no moving air
+    // yet - the turbulence "wind" is a torque - but real wind would plug in here, by subtracting
+    // the air's velocity from the body's before anything else.
+    applyAirDrag() {
+        const body = this.droneBody;
+        const v = body.velocity;
+        const speed = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+        if (speed < 1e-4 || this.params.drag <= 0) return;
+
+        const a = this._aero;
+        const areas = this.dragAreas;
+        body.quaternion.conjugate(a.qInv);
+        a.qInv.vmult(v, a.vLocal);
+
+        const k = -0.5 * this.airDensity * speed;
+        const kr = -this.rotorDrag * this.rpmFraction();
+        const scale = this.params.drag;
+        a.fLocal.set(
+            (k * areas.x + kr) * a.vLocal.x * scale,
+            k * areas.y * a.vLocal.y * scale,
+            (k * areas.z + kr) * a.vLocal.z * scale
+        );
+        body.quaternion.vmult(a.fLocal, a.fWorld);
+        body.force.vadd(a.fWorld, body.force);
+    }
+
+    // Total thrust of the four props, in newtons, for a throttle command at the drone's current
+    // velocity and attitude.
+    computeThrust(throttle) {
+        const staticFraction = this.staticThrustFraction(throttle);
+        if (staticFraction <= 0) return 0;
+
+        // Thrust goes as RPM squared, so this is how fast the props are turning
+        const rpmFraction = Math.sqrt(staticFraction);
+
+        // Air arriving through the disc along the thrust axis - climbing, or leaning into a fast
+        // forward run - means each blade meets it at a shallower angle and bites less. Thrust falls
+        // linearly to nothing at the pitch speed, which itself scales with RPM.
+        const a = this._aero;
+        this.droneBody.quaternion.vmult(a.unitY, a.up);
+        const inflow = this.droneBody.velocity.dot(a.up);
+        if (inflow <= 0) {
+            // Descending into the props' own wash. Momentum theory would give a little back;
+            // vortex ring state takes that and more. Neither is modelled - that is prop wash,
+            // which belongs with per-motor thrust - so a descent simply gets static thrust.
+            return this.params.maxThrust * staticFraction;
+        }
+        const pitchSpeed = this.params.propPitchSpeed * rpmFraction;
+        const inflowFactor = Math.max(0, 1 - inflow / pitchSpeed);
+        return this.params.maxThrust * staticFraction * inflowFactor;
+    }
+
     applyInputsInternal(axes) {
         // Calculate thrust vector and apply locally at center of mass
-        const thrustAmount = axes.throttle * this.params.maxThrust;
+        const thrustAmount = this.computeThrust(axes.throttle);
         const localThrust = new CANNON.Vec3(0, thrustAmount, 0);
 
         // Apply force exactly at the center of mass (0,0,0 local) to avoid unintended lever arm torque

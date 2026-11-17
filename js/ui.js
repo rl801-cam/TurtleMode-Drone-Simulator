@@ -1,6 +1,6 @@
 // ui.js - Handles DOM interactions and Menus
 
-import { TRACKS, DEFAULT_TRACK, formatTime } from './tracks.js?v=30';
+import { TRACKS, DEFAULT_TRACK, formatTime } from './tracks.js?v=31';
 
 export class UIHandler {
     constructor(physicsEngine, inputHandler, renderer, race, startCallback, resumeCallback, resetCallback, exitCallback) {
@@ -475,6 +475,8 @@ export class UIHandler {
         // Launch Menu
         bindSlider('cfg-mass', 'val-mass', (val) => this.physics.updateConfig({ mass: val }));
         bindSlider('cfg-thrust', 'val-thrust', (val) => this.physics.updateConfig({ thrust: val }));
+        bindSlider('cfg-thrust-curve', 'val-thrust-curve', (val) => this.physics.updateConfig({ thrustCurve: val }), 2);
+        bindSlider('cfg-pitch-speed', 'val-pitch-speed', (val) => this.physics.updateConfig({ propPitchSpeed: val }), 0);
         bindSlider('cfg-drag', 'val-drag', (val) => this.physics.updateConfig({ drag: val }));
         bindSlider('cfg-restitution', 'val-restitution', (val) => this.physics.updateConfig({ restitution: val }), 2);
         bindSlider('cfg-friction', 'val-friction', (val) => this.physics.updateConfig({ friction: val }), 2);
@@ -598,6 +600,8 @@ export class UIHandler {
         this.physics.updateConfig({
             mass: num('cfg-mass'),
             thrust: num('cfg-thrust'),
+            thrustCurve: num('cfg-thrust-curve'),
+            propPitchSpeed: num('cfg-pitch-speed'),
             drag: num('cfg-drag'),
             restitution: num('cfg-restitution'),
             friction: num('cfg-friction'),
