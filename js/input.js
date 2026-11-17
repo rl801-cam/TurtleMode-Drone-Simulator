@@ -24,7 +24,12 @@ export class InputHandler {
         };
         
         this.armed = false;
-        
+
+        // The hummingbird reads throttle as climb/descend with the centre holding height, so the
+        // keyboard's W and S become momentary there (setThrottleCentred). A transmitter's stick is
+        // simply parked mid-travel.
+        this.throttleCentred = false;
+
         // Typical FPV Radio axis mapping (can be adjusted via UI later)
         // Adjust these indices based on the controller.
         this.mapping = {
@@ -43,6 +48,11 @@ export class InputHandler {
         };
 
         this.initListeners();
+    }
+
+    setThrottleCentred(centred) {
+        this.throttleCentred = centred;
+        if (this.gamepadIndex === null) this.axes.throttle = centred ? 0.5 : 0;
     }
 
     updateMapping(type, key, value) {
@@ -75,7 +85,8 @@ export class InputHandler {
         
         // Keyboard fallback for testing without a radio: W/S throttle, A/D yaw, I/K pitch,
         // J/L roll, space to arm. Throttle deliberately does not self-centre, matching a real
-        // transmitter's ratcheted stick.
+        // transmitter's ratcheted stick - except for the hummingbird, where it springs back to the
+        // centre (hold height) when W or S is let go.
         //
         // Pitch and roll sat on the arrow keys until they were moved here. The arrows are the
         // documented in-flight camera uptilt control - the launch menu and the OSD both say so -
@@ -105,6 +116,7 @@ export class InputHandler {
         window.addEventListener("keyup", (e) => {
             if (isTyping()) return;
             switch (e.key.toLowerCase()) {
+                case 'w': case 's': if (this.throttleCentred) this.axes.throttle = 0.5; break;
                 case 'a': case 'd': this.axes.yaw = 0; break;
                 case 'i': case 'k': this.axes.pitch = 0; break;
                 case 'j': case 'l': this.axes.roll = 0; break;

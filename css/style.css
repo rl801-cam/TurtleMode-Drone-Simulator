@@ -422,6 +422,14 @@ button {
     right: 40px;
 }
 
+/* The hummingbird's state line sits above the readouts rather than lengthening them into the
+   centred arm badge */
+#osd-bird {
+    bottom: 80px;
+    right: 40px;
+    font-size: 1.1rem;
+}
+
 /* No FPV crosshair when watching the drone from the ground */
 #osd.los-view .osd-center-crosshair {
     display: none;
@@ -460,6 +468,12 @@ button {
 .race-only { display: none; }
 body.mode-race .race-only { display: block; }
 body.mode-race .practice-only { display: none; }
+
+/* Practice vehicle: the quad's airframe, wind and rates sections mean nothing to the hummingbird,
+   which flies on its own robot model and controller. ui.js only sets vehicle-bird in practice. */
+.bird-only { display: none; }
+body.vehicle-bird .bird-only { display: block; }
+body.vehicle-bird .quad-only { display: none; }
 
 .mode-switch {
     display: flex;

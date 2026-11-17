@@ -33,14 +33,20 @@ hosted on GitHub Pages. Two modes: **Practice**, free flight with every paramete
 | `js/latency.js` | Artificial video-link delay |
 | `js/race.js` | Gate meshes, crossing detection, lap clock, persistent leaderboard |
 | `js/tracks.js` | Course data (gates, radii, spawn) and the fixed racing spec |
+| `js/hummingbird/flapper.js` | The flapping-wing robot ported from flappy: five-body dynamics, wing aerodynamics, motors |
+| `js/hummingbird/policy.js` | The learned controller: observation, neural network, drive waveforms |
+| `js/hummingbird/hummingbird.js` | Robot + controller in flappy's training loop, plus stick-to-target piloting, takeoff, landing, crashes |
+| `models/hummingbird/` | `robot.json` and the controller `ppo2new_4M.json`, exported from flappy |
+| `tests/` | `hummingbird.test.mjs` and its DART reference data. Run with `node tests/hummingbird.test.mjs` |
 | `vendor/` | Committed browser dependencies the importmap points at. Written by `tools/vendor-deps.mjs` |
 | `tools/` | Offline map generation and inspection, plus `bump-version.mjs` and `vendor-deps.mjs`. Not loaded by the page |
 
-**Module caching:** `index.html` and the imports in `main.js` and `ui.js` carry a `?v=N`
-cache-busting tag, and the running build is logged to the console and shown in the launch menu.
-All twelve tags and the `BUILD` constant must agree, so they are bumped by tool rather than by hand
+**Module caching:** `index.html`, the imports in `main.js`, `ui.js` and `physics.js`, the
+hummingbird's modules and the two model files it fetches carry a `?v=N` cache-busting tag, and the
+running build is logged to the console and shown in the launch menu. All eighteen tags and the
+`BUILD` constant must agree, so they are bumped by tool rather than by hand
 — `node tools/bump-version.mjs`, with `--check` to verify they have not drifted. **The current
-build is `v32`.** `index.html` itself is not versioned, so a browser holding a stale copy of it will
+build is `v34`.** `index.html` itself is not versioned, so a browser holding a stale copy of it will
 keep requesting the old module versions — check the build stamp before debugging anything that looks
 like an unapplied change.
 
@@ -263,17 +269,45 @@ viewpoint to the start grid, and locks the airframe to a fixed spec.
 - **Render scale is capped at 2× device pixel ratio.** A 3× panel was rendering nine times the
   pixels of a 1× one, for a difference invisible at that density and well over half the framerate.
 
-### 3.10 Default Configuration
+### 3.10 Hummingbird
+A second practice vehicle: Purdue's flapping-wing robot from the *flappy* simulator, about 12 g and
+17 cm wingtip to wingtip, flown by a neural-network controller trained with reinforcement learning
+(PPO, `ppo2new_4M`). Chosen under *Vehicle* in the Practice launch menu; races stay on the quad.
+- **Physics** are flappy's, ported line for line and checked against the original DART simulation
+  (§4): torso plus two leading edges and two wings, motor-driven stroke joints on springs, passive
+  wing rotation stopped at ±45°, quasi-steady blade-element wing aerodynamics, a DC motor model
+  per wing, at 10 kHz with the controller at 500 Hz.
+- **Piloting** is through the controller: the sticks move the point it chases, at up to 0.2 m/s
+  (what it was trained on). Throttle climbs and descends with the centre holding height; pitch and
+  roll move it; yaw turns it at about 35°/s by turning the world it is shown, never more than 17°
+  ahead of where it points.
+- **Takeoff and landing.** It starts sitting on the ground under the spawn and lifts off when the
+  throttle goes up; the target eases in over the last few centimetres on the way down, and a slow
+  touchdown is a landing. Anything else touching the map in flight is a crash — `R` to reset.
+- **Cameras.** FPV rides on its head; Line of Sight stands 1 m back and 0.8 m up, and marks the
+  target with a dot and a line dropped to the ground.
+- **Not modelled for the bird:** wind, contact physics (a touch is a crash) and motor sound. The
+  controller sees the true state rather than flappy's simulated IMU and motion capture, and hovers
+  about 2 cm below its target, a steady offset it was trained with.
+
+### 3.11 Default Configuration
 Mass `0.5 kg` · Max thrust `30 N` (~6:1 TWR, hover near 29% throttle) · Thrust curve `0.6` ·
 Prop pitch speed `60 m/s` · Air drag `1.0×` · Restitution `0.2` · Surface grip `0.2` · Wind `0.1`
 on all three axes · Video latency `0 ms` · Camera uptilt `10°` · Default map `Bando`.
 
 Racing uses the same numbers with wind off and latency pinned at zero.
 
-**What persists:** camera mode, LOS zoom, camera uptilt, speed readout, audio, game mode, track,
-pilot name and the leaderboards. Rates, physics parameters and axis mappings do not.
+**What persists:** camera mode, LOS zoom, camera uptilt, speed readout, audio, game mode, practice
+vehicle, track, pilot name and the leaderboards. Rates, physics parameters and axis mappings do not.
 
 ## 4. Verification
+
+**The hummingbird has a committed test:** `node tests/hummingbird.test.mjs`. It checks the port
+against reference data recorded from flappy's DART simulation (`export_simulator.py --reference`
+in the flappy repository): kinematics, mass matrix, bias forces and wing aerodynamics at random
+states to about 1e-12, single 10 kHz steps to 1e-9, an open-loop replay, the controller's
+observations and actions, a 4 s closed-loop flight that stays within 5 mm of DART's, and a
+scripted pilot session from takeoff to landing. It runs in a couple of seconds.
 
 `physics.js` and `audio.js` are deliberately free of DOM dependencies, so they can be driven
 headlessly under Node — against synthetic collision callbacks and a stubbed Web Audio API
@@ -362,7 +396,7 @@ against those exact triangles.
 - **A second map and a second track**, both generated — Rift Quarry and Rift Run — along with the
   toolchain that builds and verifies them, and per-map sky and fog.
 - **Dependencies vendored under `vendor/`** — the sim runs offline and no longer depends on unpkg.
-- **Version bumping automated** — `tools/bump-version.mjs` keeps all twelve cache tags in step.
+- **Version bumping automated** — `tools/bump-version.mjs` keeps all the cache tags in step.
 - Map disposal on swap, frame-pacing fix, capped render scale, and map load progress.
 - **Realistic air drag and a thrust curve** (v31) — quadratic, direction-dependent airframe drag
   and rotor drag in place of linear damping; thrust curved against the throttle and fading with

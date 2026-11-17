@@ -8,19 +8,19 @@
 //
 //   node tools/bump-version.mjs           advance to the next version
 //   node tools/bump-version.mjs --check   verify they have not drifted apart
-import { Renderer } from './renderer.js?v=32';
-import { PhysicsEngine } from './physics.js?v=32';
-import { InputHandler } from './input.js?v=32';
-import { UIHandler } from './ui.js?v=32';
-import { AudioEngine } from './audio.js?v=32';
-import { VideoDelay } from './latency.js?v=32';
-import { RaceManager } from './race.js?v=32';
-import { RACE_SPEC, formatTime } from './tracks.js?v=32';
+import { Renderer } from './renderer.js?v=34';
+import { PhysicsEngine } from './physics.js?v=34';
+import { InputHandler } from './input.js?v=34';
+import { UIHandler } from './ui.js?v=34';
+import { AudioEngine } from './audio.js?v=34';
+import { VideoDelay } from './latency.js?v=34';
+import { RaceManager } from './race.js?v=34';
+import { RACE_SPEC, formatTime } from './tracks.js?v=34';
 
 // Shown in the launch menu and logged on boot. index.html itself carries no cache buster, so a
 // browser holding a stale copy of it will keep loading the old ?v= modules and none of the tags
 // above will help. If this does not match the newest version, the page needs a hard reload.
-const BUILD = 'v32';
+const BUILD = 'v34';
 
 class Simulator {
     constructor() {
@@ -142,6 +142,15 @@ class Simulator {
 
         this.mode = mode === 'race' && track ? 'race' : 'practice';
 
+        // The hummingbird is a practice vehicle; a race is always flown on the spec quad. Its robot
+        // and controller are fetched before anything else changes, so a failed download leaves us in
+        // the menu like a failed map does.
+        const vehicle = this.mode === 'practice' ? this.ui.vehicle : 'quad';
+        if (vehicle === 'bird') await this.physics.loadBird();
+        this.physics.setVehicle(vehicle);
+        this.renderer.setVehicle(vehicle);
+        this.input.setThrottleCentred(vehicle === 'bird');
+
         if (this.mode === 'race') {
             // The spec overwrites whatever the practice sliders were left on. Nothing in the
             // race UI can move these, so every lap on the board was flown on the same drone.
@@ -167,6 +176,10 @@ class Simulator {
         // download, and the race began somewhere under the map. It also means a map that fails to
         // load leaves us in MENU, where the caller's error path can be seen.
         await this.renderer.loadMap(mapChoice, onProgress);
+
+        // The bird sits on whatever surface is under the spawn, which can only be found once the
+        // collider exists
+        if (this.physics.flyingBird) this.physics.reset();
 
         if (this.mode === 'race') {
             this.race.setTrack(track);
@@ -337,6 +350,9 @@ class Simulator {
                 ? (this.videoDelay.sample(now / 1000) || droneState)
                 : droneState;
             this.renderer.updateDrone(seen);
+            // The bird's wings and the target its controller is chasing. Live, like the LOS mesh;
+            // in FPV neither is on screen.
+            if (this.physics.flyingBird) this.renderer.updateBird(this.physics.getBirdState());
 
             // 6. Aim the camera (no-op in FPV, where the camera rides on the drone)
             this.renderer.updateCamera();
@@ -346,9 +362,11 @@ class Simulator {
             // In Line of Sight the pilot is on the ground, so the drone is attenuated by range.
             // Sound is never delayed by the video setting - a quad carries no microphone, you are
             // hearing the real thing through the air while the picture lags behind it.
+            // The motor layer is a quad's props; the bird gets only the airspeed layer, which at its
+            // 0.2 m/s is near silence.
             this.audio.update(
                 axes,
-                armed,
+                armed && !this.physics.flyingBird,
                 this.physics.droneBody.velocity.length(),
                 this.renderer.getListenerDistance()
             );

@@ -1,6 +1,36 @@
 // physics.js - Handles Cannon-es physics environment and drone simulation
 
 import * as CANNON from 'cannon-es';
+import { Hummingbird, BIRD_STATE } from './hummingbird/hummingbird.js?v=34';
+
+// The hummingbird lives in flappy's axes - x forward, y left, z up - and the renderer in three's -
+// forward -Z, right +X, up +Y. C takes a flappy vector to a three one: (x, y, z) -> (-y, z, -x).
+function birdToWorld(v, out) {
+    out.x = -v[1]; out.y = v[2]; out.z = -v[0];
+    return out;
+}
+
+// Rotation matrix to quaternion (Shepperd), for the bird's attitude
+function quaternionFromMatrix(m, q) {
+    const [a, b, c, d, e, f, g, h, i] = m;
+    const tr = a + e + i;
+    if (tr > 0) {
+        const s = Math.sqrt(tr + 1) * 2;
+        q.set((h - f) / s, (c - g) / s, (d - b) / s, 0.25 * s);
+    } else if (a > e && a > i) {
+        const s = Math.sqrt(1 + a - e - i) * 2;
+        q.set(0.25 * s, (b + d) / s, (c + g) / s, (h - f) / s);
+    } else if (e > i) {
+        const s = Math.sqrt(1 + e - a - i) * 2;
+        q.set((b + d) / s, 0.25 * s, (f + h) / s, (c - g) / s);
+    } else {
+        const s = Math.sqrt(1 + i - a - e) * 2;
+        q.set((c + g) / s, (f + h) / s, 0.25 * s, (d - b) / s);
+    }
+    return q;
+}
+
+export { BIRD_STATE };
 
 export class PhysicsEngine {
     constructor() {
@@ -149,6 +179,15 @@ export class PhysicsEngine {
 
         this.currentAxes = null;
         this.isArmed = false;
+
+        // Which airframe is flying. 'bird' is the flapping-wing hummingbird (js/hummingbird/), which
+        // brings its own physics: while it flies the Cannon world is not stepped, and the drone body
+        // only carries the bird's pose for everything else that reads it - the cameras, the video
+        // delay, the speed readout and the LOS distance.
+        this.vehicle = 'quad';
+        this.bird = null;
+        this._birdLoad = null;
+        this._birdScratch = { p: new Float64Array(3), v: new Float64Array(3), m: new Float64Array(9) };
 
         // Apply continuous forces per physics sub-step using World events
         // This is guaranteed to run before every single internal integration step.
@@ -529,7 +568,101 @@ export class PhysicsEngine {
         );
     }
 
+    // --- Hummingbird -------------------------------------------------------
+
+    // Fetches the robot and its controller (exported from flappy by export_simulator.py) once.
+    // Resolves when `this.bird` is ready.
+    loadBird() {
+        if (!this._birdLoad) {
+            const get = (url) => fetch(url).then((r) => {
+                if (!r.ok) throw new Error(`${url}: ${r.status}`);
+                return r.json();
+            });
+            this._birdLoad = Promise.all([
+                get('models/hummingbird/robot.json?v=34'),
+                get('models/hummingbird/ppo2new_4M.json?v=34')
+            ]).then(([robot, policy]) => {
+                this.bird = new Hummingbird(robot, policy, {
+                    groundAt: (x, y, z) => this.birdGroundAt(x, y, z),
+                    collides: (p, r) => this.birdCollides(p, r)
+                });
+            }).catch((err) => {
+                this._birdLoad = null; // let a failed load be retried
+                throw err;
+            });
+        }
+        return this._birdLoad;
+    }
+
+    setVehicle(vehicle) {
+        this.vehicle = vehicle === 'bird' && this.bird ? 'bird' : 'quad';
+    }
+
+    get flyingBird() {
+        return this.vehicle === 'bird' && this.bird !== null;
+    }
+
+    // Height (flappy z) of the first surface straight below a point, or null if there is none
+    // within 50 m. Rays start at the point itself, so a roof overhead is never mistaken for the floor.
+    birdGroundAt(x, y, z) {
+        if (!this.sweepCallback) return null;
+        const hit = this.sweepCallback({ x: -y, y: z, z: -x }, { x: -y, y: z - 50, z: -x });
+        return hit ? hit.point.y : null;
+    }
+
+    birdCollides(p, radius) {
+        if (!this.collisionCallback) return false;
+        return this.collisionCallback({ x: -p[1], y: p[2], z: -p[0] }, radius) !== null;
+    }
+
+    // Copy the bird's torso pose and velocity onto the drone body, in the renderer's axes
+    syncBird() {
+        const f = this.bird.flapper, s = this._birdScratch, body = this.droneBody;
+        birdToWorld(f.p, body.position);
+        birdToWorld(f.comVelocity(s.v), body.velocity);
+        body.angularVelocity.set(0, 0, 0);
+        // attitude in three's axes: C R C^T with C = [[0,-1,0],[0,0,1],[-1,0,0]]
+        const R = f.R, m = s.m;
+        m[0] = R[4]; m[1] = -R[5]; m[2] = R[3];
+        m[3] = -R[7]; m[4] = R[8]; m[5] = -R[6];
+        m[6] = R[1]; m[7] = -R[2]; m[8] = R[0];
+        quaternionFromMatrix(m, body.quaternion);
+        body.quaternion.normalize();
+    }
+
+    // What the renderer and OSD need about the bird, in the renderer's axes where it matters
+    getBirdState() {
+        const b = this.bird, f = b.flapper;
+        const target = birdToWorld(b.target, { x: 0, y: 0, z: 0 });
+        const com = f.comPosition(this._birdScratch.p);
+        const ground = this.birdGroundAt(com[0], com[1], com[2]);
+        const targetGround = this.birdGroundAt(b.target[0], b.target[1], b.target[2]);
+        return {
+            state: b.state,
+            crashReason: b.crashReason,
+            stroke: [f.q[6], f.q[8]],
+            rotate: [f.q[7], f.q[9]],
+            target,
+            targetGround,
+            altitude: ground === null ? null : com[2] - ground - b.restHeight,
+            targetSpeed: Math.hypot(b.targetVel[0], b.targetVel[1], b.targetVel[2])
+        };
+    }
+
     reset() {
+        if (this.flyingBird) {
+            // The bird starts sitting on whatever is under the spawn point, facing the spawn heading
+            const p = this.spawn.position;
+            const fx = -p.z, fy = -p.x, fz = p.y;
+            const ground = this.birdGroundAt(fx, fy, fz);
+            const q = this.spawn.quaternion;
+            // spawn yaw is about +Y in three's axes, which is about +z in the bird's
+            const yaw = 2 * Math.atan2(q.y, q.w);
+            this.bird.reset([fx, fy, ground === null ? fz : ground], yaw);
+            this.syncBird();
+            this.droneBody.velocity.set(0, 0, 0);
+            return;
+        }
         // Reset position and velocity
         this.droneBody.position.copy(this.spawn.position);
         this.droneBody.quaternion.copy(this.spawn.quaternion);
@@ -709,7 +842,25 @@ export class PhysicsEngine {
     }
 
     step(dt) {
+        if (this.flyingBird) {
+            this.stepBird(dt);
+            return;
+        }
         this.world.step(this.fixedTimeStep, dt, 20);
+    }
+
+    // The bird is flown through its controller: the sticks move the point it chases. Throttle is
+    // centred to hold height - up climbs, down descends - with a deadband so a real transmitter's
+    // ratcheted stick can be parked; pitch and roll move it forward/back and sideways, yaw turns it.
+    stepBird(dt) {
+        const a = this.currentAxes || { throttle: 0.5, yaw: 0, pitch: 0, roll: 0 };
+        const deadband = 0.1;
+        let up = (a.throttle - 0.5) * 2;
+        up = Math.abs(up) < deadband ? 0 : Math.sign(up) * (Math.abs(up) - deadband) / (1 - deadband);
+        this.bird.setSticks(-a.pitch, a.roll, up, a.yaw);
+        this.bird.setArmed(this.isArmed);
+        this.bird.advance(dt);
+        this.syncBird();
     }
 
     getDroneState() {

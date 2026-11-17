@@ -95,10 +95,18 @@ export class Renderer {
         // built, since the model's camera pod is placed on it.
         this.cameraOffset = new THREE.Vector3(0, 0.03, -0.13);
 
-        // Drone Mesh (Visual rep of the collision box, only shown in Line of Sight mode)
-        this.droneMesh = this.createDroneModel();
+        // Drone Mesh (Visual rep of the collision box, only shown in Line of Sight mode). It holds a
+        // model per vehicle, and only the one being flown is shown (setVehicle).
+        this.droneMesh = new THREE.Group();
+        this.quadModel = this.createDroneModel();
+        this.droneMesh.add(this.quadModel);
+        this.birdModel = this.createBirdModel();
+        this.birdModel.visible = false;
+        this.droneMesh.add(this.birdModel);
+        this.vehicle = 'quad';
         this.droneMesh.visible = false; // Make invisible for FPV
         this.scene.add(this.droneMesh);
+        this.createBirdTargetMarker();
 
         // Attach Camera to Drone
         this.droneMesh.add(this.camera);
@@ -268,6 +276,147 @@ export class Renderer {
         return group;
     }
 
+    // The flapping-wing hummingbird, built on flappy's robot (models/hummingbird/robot.json): a torso
+    // and, on each side, a leading edge that sweeps about the stroke joint carrying a wing that twists
+    // about its leading edge. Built in flappy's axes (x forward, y left, z up) inside a group that
+    // turns them into three's, so the joint offsets and axes are the robot's own numbers and
+    // updateBird() can set the joints straight from the simulation. Real size: 17 cm wingtip to
+    // wingtip, the torso's centre of mass 4 cm off the ground when it sits.
+    createBirdModel() {
+        const outer = new THREE.Group();
+        const bird = new THREE.Group();
+        // flappy (x, y, z) -> three (-y, z, -x)
+        bird.quaternion.setFromRotationMatrix(new THREE.Matrix4().set(
+            0, -1, 0, 0,
+            0, 0, 1, 0,
+            -1, 0, 0, 0,
+            0, 0, 0, 1));
+        outer.add(bird);
+
+        const mat = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.5, fog: false, ...extra });
+        const bodyMat = mat(0x1f8a5a, { metalness: 0.35, roughness: 0.35 }); // iridescent green
+        const throatMat = mat(0xc2185b, { metalness: 0.3, roughness: 0.3 }); // ruby throat: the front
+        const darkMat = mat(0x222222);
+        const membraneMat = new THREE.MeshStandardMaterial({
+            color: 0xdfe8f0, transparent: true, opacity: 0.55, side: THREE.DoubleSide,
+            roughness: 0.4, depthWrite: false, fog: false
+        });
+        const add = (geometry, material, parent, x = 0, y = 0, z = 0) => {
+            const m = new THREE.Mesh(geometry, material);
+            m.position.set(x, y, z);
+            m.castShadow = true;
+            parent.add(m);
+            return m;
+        };
+
+        // Upright torso hanging under the wing roots, its base 4 cm below the centre of mass
+        const torso = add(new THREE.SphereGeometry(1, 20, 14), bodyMat, bird, 0, 0, -0.012);
+        torso.scale.set(0.011, 0.01, 0.026);
+        add(new THREE.SphereGeometry(0.0085, 16, 12), bodyMat, bird, 0.002, 0, 0.018); // head
+        const throat = add(new THREE.SphereGeometry(1, 14, 10), throatMat, bird, 0.007, 0, 0.008);
+        throat.scale.set(0.006, 0.008, 0.008);
+        // beak, pointing along +x - the way the bird faces and flies "forward"
+        const beak = add(new THREE.ConeGeometry(0.0022, 0.03, 8), darkMat, bird, 0.024, 0, 0.019);
+        beak.rotation.z = -Math.PI / 2; // cone axis +y -> +x
+        // tail fan, trailing down and back
+        const tail = add(new THREE.ConeGeometry(0.008, 0.02, 3), bodyMat, bird, -0.004, 0, -0.044);
+        tail.rotation.y = Math.PI;
+        tail.scale.set(1, 1, 0.25);
+
+        // Wings. The membrane hangs below the leading edge in the wing's y-z plane: root chord 35 mm
+        // tapering to the tip, span 70 mm (Wing_Camber_70mm_C35mm in flappy).
+        const outline = [[0.004, 0], [0.07, 0], [0.068, -0.01], [0.055, -0.024], [0.03, -0.033], [0.004, -0.035]];
+        const wingGeometry = (side) => {
+            const g = new THREE.BufferGeometry();
+            const pos = [];
+            for (let i = 1; i < outline.length - 1; i++) {
+                for (const k of [0, i, i + 1]) pos.push(0, side * outline[k][0], outline[k][1]);
+            }
+            g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+            g.computeVertexNormals();
+            return g;
+        };
+        const edgeGeometry = new THREE.CylinderGeometry(0.0009, 0.0009, 0.07, 6); // along +y
+        this.birdJoints = [];
+        for (const [side, y, axisZ] of [[1, 0.01395, 1], [-1, -0.01395, -1]]) {
+            const leadingEdge = new THREE.Group();
+            leadingEdge.position.set(0, y, 0.0189913);
+            bird.add(leadingEdge);
+            add(edgeGeometry, darkMat, leadingEdge, 0, side * 0.035, 0);
+            const wing = new THREE.Group();
+            leadingEdge.add(wing);
+            const membrane = add(wingGeometry(side), membraneMat, wing);
+            membrane.castShadow = false;
+            this.birdJoints.push({ leadingEdge, wing, axis: new THREE.Vector3(0, 0, axisZ) });
+        }
+        return outer;
+    }
+
+    // A small marker on the point the bird's controller is chasing, with a line dropped to the ground
+    // under it - depth is hard to judge on something this small. Line of Sight only.
+    createBirdTargetMarker() {
+        const color = 0x33ddff;
+        this.birdTarget = new THREE.Mesh(
+            new THREE.SphereGeometry(0.006, 12, 8),
+            new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, fog: false })
+        );
+        const lineGeo = new THREE.BufferGeometry();
+        lineGeo.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, -1, 0], 3));
+        this.birdTargetLine = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({
+            color, transparent: true, opacity: 0.5, fog: false
+        }));
+        this.birdTarget.visible = false;
+        this.birdTargetLine.visible = false;
+        // Parented to the scene, never to environmentGroup: everything under that becomes collision
+        // geometry (invariant 17)
+        this.scene.add(this.birdTarget);
+        this.scene.add(this.birdTargetLine);
+    }
+
+    // Swap the airframe shown, the FPV camera's mount and the Line of Sight viewpoint. The bird's
+    // camera sits on its head; the pilot of a 17 cm bird stands closer than a quad pilot would.
+    setVehicle(vehicle) {
+        this.vehicle = vehicle === 'bird' ? 'bird' : 'quad';
+        const bird = this.vehicle === 'bird';
+        this.quadModel.visible = !bird;
+        this.birdModel.visible = bird;
+        if (bird) {
+            this.cameraOffset.set(0, 0.022, -0.012);
+            this.losEyeHeight = 0.8;
+            this.losStandoff = 1.0;
+        } else {
+            this.cameraOffset.set(0, 0.03, -0.13);
+            this.losEyeHeight = 5;
+            this.losStandoff = 3;
+            this.birdTarget.visible = false;
+            this.birdTargetLine.visible = false;
+        }
+        this.setSpawnPoint(this.spawnPosition.x, this.spawnPosition.y, this.spawnPosition.z);
+        this.resetCamera();
+    }
+
+    // Wing joints and the target marker, from physics.getBirdState()
+    updateBird(state) {
+        for (let k = 0; k < 2; k++) {
+            const j = this.birdJoints[k];
+            j.leadingEdge.quaternion.setFromAxisAngle(j.axis, state.stroke[k]);
+            j.wing.rotation.set(0, state.rotate[k], 0);
+        }
+        const show = this.cameraMode === 'los' && state.state !== 'crashed';
+        this.birdTarget.visible = show;
+        this.birdTargetLine.visible = show && state.targetGround !== null;
+        if (!show) return;
+        const t = state.target;
+        this.birdTarget.position.set(t.x, t.y, t.z);
+        if (state.targetGround !== null) {
+            const p = this.birdTargetLine.geometry.attributes.position;
+            p.setXYZ(0, t.x, t.y, t.z);
+            p.setXYZ(1, t.x, state.targetGround, t.z);
+            p.needsUpdate = true;
+            this.birdTargetLine.geometry.computeBoundingSphere();
+        }
+    }
+
     setCameraMode(mode) {
         this.cameraMode = mode === 'los' ? 'los' : 'fpv';
 
@@ -280,6 +429,9 @@ export class Renderer {
             this.droneMesh.add(this.camera);
             this.camera.fov = this.fpvFov;
             this.droneMesh.visible = false;
+            // the bird's target sits centimetres from its head camera
+            this.birdTarget.visible = false;
+            this.birdTargetLine.visible = false;
         }
 
         this.camera.updateProjectionMatrix();

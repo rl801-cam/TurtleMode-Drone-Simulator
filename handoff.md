@@ -46,6 +46,12 @@ the airframe to a fixed spec and times laps round a gated course, with a persist
 * **`js/race.js`** — gate meshes, crossing detection, the lap clock, and the `localStorage`
   leaderboard.
 * **`js/tracks.js`** — course data (gate positions, radii, spawn) and the fixed racing spec.
+* **`js/hummingbird/`** — the flapping-wing hummingbird and its learned controller, pure and
+  DOM-free (see *How the hummingbird works*). `flapper.js` is the robot, `policy.js` the controller,
+  `hummingbird.js` the two in flappy's training loop plus the piloting.
+* **`models/hummingbird/`** — `robot.json` and `ppo2new_4M.json`, the robot and controller exported
+  from flappy. Fetched by `physics.loadBird()`.
+* **`tests/`** — `hummingbird.test.mjs` and the DART reference data it checks against.
 * **`tools/`** — offline map generation, plus two maintenance scripts: `bump-version.mjs` advances
   the cache-busting tags (see *Caching*) and `vendor-deps.mjs` refreshes `vendor/`.
   `generate-rift-quarry.mjs` builds `rift-quarry.glb` and
@@ -65,7 +71,7 @@ the flight model also means bumping `BOARD_REVISION` in `race.js` (invariant 32)
 
 ### What persists
 `localStorage` holds camera mode, LOS zoom, camera uptilt, speed readout, audio, game mode,
-selected track, pilot name and the per-track leaderboards. **Rates, physics parameters and axis
+practice vehicle, selected track, pilot name and the per-track leaderboards. **Rates, physics parameters and axis
 mappings do not** — they come from the HTML defaults on every load.
 
 ## How the physics actually works
@@ -125,6 +131,65 @@ What the default airframe does (25 N before, 30 N since v32), measured headlessl
 
 Landing and settling are unchanged: a flat drop, tilted drop, sliding landing and a 15 m/s crash
 all come to rest (|v| < 0.02 m/s, |ω| < 0.05 rad/s, disarmed) as before.
+
+## How the hummingbird works
+
+The second practice vehicle is Purdue's flapping-wing robot from the *flappy* simulator
+(github.com/purdue-biorobotics/flappy), flown by a PPO policy trained in flappy (`ppo2new_4M`, from
+the `rl801-cam/hummingbird` repository). It shares nothing with the quad's flight model: when it is
+flying, `physics.step()` hands over to `stepBird()`, the Cannon world is not stepped, and
+`syncBird()` copies the bird's torso pose and velocity onto `droneBody` so the cameras, video delay,
+speed readout and LOS distance work unchanged.
+
+**The physics is flappy's, not an approximation of it**, because the controller only flies the
+physics it was trained on. `flapper.js` reproduces one DART `World::step` at 10 kHz: five bodies
+(torso on a free joint; on each side a leading edge on a motor-driven stroke joint with a spring,
+carrying a wing on a passive rotate joint), mass matrix by composite rigid bodies, bias forces by
+recursive Newton-Euler, a 10x10 Cholesky solve, then DART's joint constraints, then positions. The
+wing forces are `Wing.cpp`'s quasi-steady blade-element model and the motors are `fwmav.py`'s
+`Actuator`. `hummingbird.js` wraps that in `fwmav_sim_env.py`'s loop: the controller at 500 Hz, the
+drive waveform sampled once per 2 ms period and held.
+
+**Coordinates.** Everything under `js/hummingbird/` is in flappy's axes: x forward (the beak), y left,
+z up. `physics.js` converts with `(x, y, z) -> (-y, z, -x)` and the renderer builds the bird model
+in flappy's axes inside a group carrying the same rotation, so joint offsets and axes in the model
+are the robot's own numbers.
+
+**Piloting.** The sticks never touch the motors. They move the *target* - the point the controller
+chases - at up to 0.2 m/s (throttle up/down with the centre holding height, pitch/roll
+forward/sideways), and turn its heading at 0.6 rad/s. Turning works by rotating the world the
+controller is shown: it was trained to hold yaw at zero, so the target heading is kept within 0.3 rad
+of where the bird actually points. The target is leashed to 25 cm from the bird and never goes below
+the ground. Takeoff and crashes follow flappy's `Floor` rules (held on the ground until the target
+rises; airborne 2 cm up; a takeoff fails if the target is 25 cm up first; touching anything after
+that is a crash), plus a landing: coming down, the target eases in over the last few centimetres,
+and a slow touchdown with the target near the ground re-parks the bird.
+
+**Getting a new controller or robot in.** `export_simulator.py` in the flappy repository writes
+`robot.json` and `<model>.json` (`--out`) and the test reference (`--reference`). Point
+`loadBird()` at a different policy file to fly another model; it has to have the same 18
+observations and 4 actions.
+
+### Hummingbird invariants
+
+33. **The controller's observation has to be flappy's, slip and all.** `flappyRotation()` copies
+    `euler_2_R`, including the `cos(phi)` where `sin(phi)` belongs in `R[0][1]`. It is wrong as a
+    rotation matrix and right as an input, since the network was trained on it; "fixing" it changes
+    what the controller sees. The same goes for timing: it is shown the state from the *start* of
+    each 2 ms period, and the clocks advance by repeated addition and are compared exactly as
+    flappy compares them, so the occasional 19- or 21-step period falls where it does there.
+34. **Joint limits stop dead, and joint friction is not negligible.** Both were measured against
+    DART: the wing-rotation limit is an inelastic stop with no push-back (a push-back of 1e-3 rad/s
+    put the wing's acceleration 10 rad/s^2 off on every hit), and the URDF's tiny joint friction is
+    an impulse of `friction x dt` every step (left out, 1.8 rad/s^2 off on every step). Both are
+    in `applyJointConstraints()`, solved together because they couple through the mass matrix.
+35. **The ground and map queries start from above the point.** `birdGroundAt()` casts down from the
+    height it is given and the bird always asks from 2 cm above itself or its target. Cast from
+    the point itself, a bird that has sunk a millimetre into the floor sees the floor below that, and
+    a target that dips below the surface for one control period loses the ground clamp altogether.
+36. **The controller hovers about 2 cm below its target.** It is a steady offset in the trained
+    policy, not a bug here, and the landing rule allows for it: a touchdown counts while the target
+    is within 5 cm of the ground, or the bird reaches the ground first and every landing is a crash.
 
 ## How racing works
 
@@ -381,7 +446,7 @@ console and shown under the Start button. **`index.html` itself is not versioned
 holding a stale copy keeps requesting the old module versions and none of the tags help. If the
 build stamp does not match, hard-reload (`Ctrl+Shift+R`) before investigating anything else.
 
-**Do not bump the tags by hand.** There are twelve of them across three files and they must all
+**Do not bump the tags by hand.** There are eighteen of them across six files and they must all
 read the same number; missing one produces the worst failure this project has — a page running a
 mixture of old and new modules, which looks exactly like a bug in whatever you just changed.
 
@@ -391,9 +456,11 @@ node tools/bump-version.mjs 42        # set an explicit version
 node tools/bump-version.mjs --check   # print the current version, or exit 1 if files disagree
 ```
 
-**Current build: `v32`** — the tags live in `index.html` (stylesheet and the `main.js` script), the
-import list at the top of `main.js`, the `tracks.js` import in `ui.js`, and the `BUILD` constant in
-`main.js`. `--check` exits non-zero if they have drifted apart, which is worth running before
+**Current build: `v34`** — the tags live in `index.html` (stylesheet and the `main.js` script), the
+import list at the top of `main.js`, the `tracks.js` import in `ui.js`, the hummingbird import and
+its two model-file URLs in `physics.js`, the hummingbird modules' imports of each other, and the
+`BUILD` constant in `main.js`. A new tagged import in any other file has to be added to `FILES` in
+the tool, or bumps will skip it. `--check` exits non-zero if they have drifted apart, which is worth running before
 committing.
 
 `vendor/` is deliberately **not** versioned this way. Those files change only when a dependency is
@@ -468,8 +535,34 @@ deliberately updated, and their URLs change with it.
 18. **Default and spec max thrust raised from 25 N to 30 N** (v32), about 6:1 thrust-to-weight:
     v31 felt underpowered. Hover is at 29% throttle, top speed 110 km/h, climb 27 m/s. The
     leaderboards moved to revision 3.
+19. **The hummingbird** (v33-v34). A second practice vehicle: flappy's flapping-wing robot ported to
+    JavaScript and flown by its learned controller, with stick-to-target piloting, takeoff,
+    landing and crash rules, a model with flapping wings, a head-mounted FPV camera and a closer
+    Line of Sight viewpoint with a target marker. The first part of the project with a committed
+    test. See *How the hummingbird works* and invariants 33-36.
 
 ## Verification
+
+**The hummingbird's test is committed** and can be re-run at any time:
+
+```bash
+node tests/hummingbird.test.mjs
+```
+
+It checks the port against reference data recorded from the original DART simulation by flappy's
+`export_simulator.py --reference`, using the same `models/hummingbird/` files the browser loads. At
+random states: body transforms, centre-of-mass position and velocity, mass matrix, Coriolis and
+gravity forces and wing aerodynamics, all within about 1e-12 of DART. Then every 10 kHz step of the
+start of a flight, each started from DART's own state (positions within 1e-9), an open-loop replay of
+the recorded drive, the controller's observations and actions, and the whole 4 s closed-loop flight,
+which stays within 5 mm of DART's path. Last, a scripted pilot session over flat ground: parked
+until the throttle goes up, a climb to 50 cm, a metre forward, a turn, and a landing. Regenerate the
+reference whenever the robot or the controller changes.
+
+The browser side - vehicle switching, ground placement on the real maps, wall hits, the OSD - was
+checked by hand in the running sim, stepping `window.simulator.physics` directly: a takeoff,
+moves and turns on the placeholder map, an 18 m flight across the bando over a raised floor, and a
+crash into a wall. That is not committed.
 
 `physics.js`, `audio.js` and `latency.js` are deliberately free of DOM dependencies so they can be
 driven headlessly under Node — against synthetic collision callbacks and a stubbed Web Audio API
@@ -588,6 +681,19 @@ gap that matters most.
     * *Coefficients are representative, not measured.* The drag areas, rotor drag and pitch speed
       are sized for a generic 5" quad and checked against the outcomes in the table above, not
       fitted to a particular airframe.
+12. **What the hummingbird leaves out.**
+    * *Sensing.* flappy trained the controller on a simulated IMU and motion-capture system with
+      noise and a 30 ms delay, run through an EKF. Here it is shown the true state. Measured in
+      flappy on the standard robot, that flies as well or better (moving and takeoff 30/30 both
+      ways), but it is a difference from training.
+    * *The standard robot only.* flappy randomises mass, springs, wing limits and motor resistance
+      per episode, and the controller was trained on that; the browser flies the nominal robot.
+    * *Wind, contacts and sound.* No wind acts on the bird, a touch in flight is a crash rather than
+      a bounce, and it is silent (the motor audio is a quad's props, so it is gated off).
+    * *Its controller's limits.* Targets faster than 0.2 m/s are outside what it was trained on, it
+      holds height about 2 cm low, and it recovers unreliably from large tilts.
+    * *Self-collision.* DART checked the wings against the torso; the port does not. It never
+      mattered in the reference flights.
 
 ---
 *End of Handoff Document*

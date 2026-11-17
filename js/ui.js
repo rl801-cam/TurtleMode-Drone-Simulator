@@ -1,6 +1,6 @@
 // ui.js - Handles DOM interactions and Menus
 
-import { TRACKS, DEFAULT_TRACK, formatTime } from './tracks.js?v=32';
+import { TRACKS, DEFAULT_TRACK, formatTime } from './tracks.js?v=34';
 
 export class UIHandler {
     constructor(physicsEngine, inputHandler, renderer, race, startCallback, resumeCallback, resetCallback, exitCallback) {
@@ -21,6 +21,8 @@ export class UIHandler {
             : DEFAULT_TRACK;
         this.speedReadoutEnabled = localStorage.getItem('speedReadoutEnabled') === 'true';
         this.cameraMode = localStorage.getItem('cameraMode') === 'los' ? 'los' : 'fpv';
+        // What practice flies: the quad, or the flapping-wing hummingbird. Races always use the quad.
+        this.vehicle = localStorage.getItem('vehicle') === 'bird' ? 'bird' : 'quad';
         this.losFov = parseFloat(localStorage.getItem('losFov')) || 50;
         // Not `|| 10` - 0 degrees is a legitimate setting and would be silently overwritten
         const storedUptilt = parseFloat(localStorage.getItem('fpvUptilt'));
@@ -54,6 +56,7 @@ export class UIHandler {
             
             osdArm: document.getElementById('osd-arm'),
             osdThrottle: document.getElementById('osd-throttle'),
+            osdBird: document.getElementById('osd-bird'),
             speedToggle: document.getElementById('speed-readout-toggle'),
 
             viewMode: document.getElementById('view-mode'),
@@ -68,6 +71,7 @@ export class UIHandler {
 
             modeSwitch: document.getElementById('mode-switch'),
             modeBlurb: document.getElementById('mode-blurb'),
+            vehicleChoice: document.getElementById('vehicle-choice'),
             trackSelect: document.getElementById('race-track'),
             trackDesc: document.getElementById('race-track-desc'),
             pilotName: document.getElementById('pilot-name'),
@@ -93,7 +97,31 @@ export class UIHandler {
         this.bindSliders();
         this.initCameraMode();
         this.initRaceControls();
+        this.initVehicle();
         this.applyMode(this.mode);
+    }
+
+    // --- Vehicle -----------------------------------------------------------
+
+    initVehicle() {
+        const { vehicleChoice } = this.elements;
+        if (vehicleChoice) {
+            vehicleChoice.value = this.vehicle;
+            vehicleChoice.addEventListener('change', (e) => this.applyVehicle(e.target.value));
+        }
+    }
+
+    applyVehicle(vehicle) {
+        this.vehicle = vehicle === 'bird' ? 'bird' : 'quad';
+        localStorage.setItem('vehicle', this.vehicle);
+        if (this.elements.vehicleChoice) this.elements.vehicleChoice.value = this.vehicle;
+        // applyMode owns everything that depends on both the mode and the vehicle
+        this.applyMode(this.mode);
+    }
+
+    // The bird only flies in practice
+    get flyingBird() {
+        return !this.isRacing && this.vehicle === 'bird';
     }
 
     get isRacing() {
@@ -156,6 +184,8 @@ export class UIHandler {
         localStorage.setItem('gameMode', this.mode);
 
         document.body.classList.toggle('mode-race', this.isRacing);
+        // Hides the quad's own settings (airframe, wind, rates) while the bird is chosen
+        document.body.classList.toggle('vehicle-bird', this.flyingBird);
         if (this.elements.modeSwitch) {
             this.elements.modeSwitch.querySelectorAll('.mode-btn').forEach((btn) => {
                 btn.classList.toggle('active', btn.dataset.mode === this.mode);
@@ -172,12 +202,15 @@ export class UIHandler {
         if (this.elements.osdInstructions) {
             this.elements.osdInstructions.textContent = this.isRacing
                 ? "'Escape' Pause | 'C' View | 'R' Back to Grid | ↑↓ Uptilt"
-                : "Press 'Escape' to Pause | 'C' to Switch View | ↑↓ Camera Uptilt | Toggle Arm Switch to Fly";
+                : this.flyingBird
+                    ? "Arm, then throttle up to take off (centre holds height) | Pitch/Roll move | Yaw turns | 'R' Reset | 'C' View"
+                    : "Press 'Escape' to Pause | 'C' to Switch View | ↑↓ Camera Uptilt | Toggle Arm Switch to Fly";
         }
         // Both menus reset to the same place; in a race that also throws the lap away, so the
         // button should say what it actually does.
         if (this.elements.btnReset) {
-            this.elements.btnReset.textContent = this.isRacing ? 'Back to Grid' : 'Reset Drone';
+            this.elements.btnReset.textContent = this.isRacing ? 'Back to Grid'
+                : this.flyingBird ? 'Reset Hummingbird' : 'Reset Drone';
         }
         if (this.elements.raceHud) {
             this.elements.raceHud.classList.toggle('hidden', !this.isRacing);
@@ -728,6 +761,11 @@ export class UIHandler {
             }
             
             let throttleText = `THR: ${Math.round(axes.throttle * 100)}%`;
+            if (this.physics.flyingBird) {
+                const bird = this.physics.getBirdState();
+                this.elements.osdBird.textContent = this.birdStatus(bird, armed);
+                throttleText = bird.altitude === null ? 'ALT: -' : `ALT: ${Math.max(0, bird.altitude).toFixed(2)} m`;
+            }
             if (this.cameraMode === 'los') {
                 throttleText += ` | DIST: ${this.renderer.getLosDistance().toFixed(0)} m`;
             }
@@ -742,5 +780,12 @@ export class UIHandler {
             }
             this.elements.osdThrottle.textContent = throttleText;
         }
+    }
+
+    // OSD line for the hummingbird: what it is doing, and what to do next
+    birdStatus(s, armed) {
+        if (s.state === 'crashed') return `CRASHED: ${s.crashReason} | 'R' to reset`;
+        if (s.state === 'landed') return armed ? 'LANDED | throttle up to take off' : 'LANDED | arm to fly';
+        return `FLYING | target ${(s.targetSpeed * 100).toFixed(0)} cm/s`;
     }
 }

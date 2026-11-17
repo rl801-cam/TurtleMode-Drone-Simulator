@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TurtleMode Simulator</title>
-    <link rel="stylesheet" href="css/style.css?v=32">
+    <link rel="stylesheet" href="css/style.css?v=34">
     <!-- Import maps for ES modules. These resolve to vendored copies under vendor/, not to a CDN:
          the sim has to work offline and must not go dark when unpkg does. Versions are pinned by
          what is committed there, so bumping a dependency means replacing the file (see
@@ -33,6 +33,22 @@
         </div>
         <p class="small-text mode-blurb" id="mode-blurb">Free flight. Every setting is yours to change.</p>
         <div class="menu-content">
+            <div class="section practice-only" id="sec-vehicle">
+                <h2>Vehicle</h2>
+                <div class="slider-group">
+                    <label for="vehicle-choice">Fly:</label>
+                    <select id="vehicle-choice" style="padding: 5px; background: rgba(0,0,0,0.3); color: white; border: 1px solid var(--panel-border); border-radius: 4px; margin-top: 5px;">
+                        <option value="quad">FPV Quad (acro)</option>
+                        <option value="bird">Hummingbird (flapping wing, learned controller)</option>
+                    </select>
+                </div>
+                <div class="bird-only">
+                    <p class="small-text" style="text-align: left;">A 12 g flapping-wing robot from Purdue's flappy simulator, flown by a neural-network controller trained with reinforcement learning (ppo2new_4M). The wings, motors and aerodynamics are flappy's, simulated at 10 kHz.</p>
+                    <p class="small-text" style="text-align: left;">The sticks don't fly it directly &ndash; they move the point the controller chases. <strong>Throttle</strong> climbs or descends, and the centre holds height. <strong>Pitch/Roll</strong> move it forward, back and sideways at up to 0.2 m/s. <strong>Yaw</strong> turns it, about 35&deg;/s. Arm, then push the throttle up to take off; bring it down gently to land. Touching anything in flight is a crash &ndash; press <strong>R</strong>.</p>
+                    <p class="small-text" style="text-align: left; margin-bottom: 0;">Keyboard: W/S climb/descend, I/K forward/back, J/L left/right, A/D turn, space to arm. In Line of Sight a blue dot marks the target.</p>
+                </div>
+            </div>
+
             <div class="section race-only" id="sec-race-setup">
                 <h2>Race Setup</h2>
                 <div class="slider-group">
@@ -143,7 +159,7 @@
                 </div>
             </div>
 
-            <div class="section config practice-only">
+            <div class="section config practice-only quad-only">
                 <h2>Drone Config</h2>
                 <div class="slider-group">
                     <label for="cfg-mass">Mass: <span id="val-mass">0.5</span> kg</label>
@@ -176,7 +192,7 @@
                 </div>
             </div>
 
-            <div class="section wind practice-only">
+            <div class="section wind practice-only quad-only">
                 <h2>Wind</h2>
                 <p class="small-text" style="text-align: left;">A light, slowly shifting breeze that nudges the drone on the axes you enable. Small enough to fly through, big enough to keep you working.</p>
                 <div class="map-row" style="justify-content: flex-start; gap: 25px;">
@@ -212,7 +228,7 @@
                 <div id="pause-leaderboard" style="margin-top: 15px;"></div>
                 <p class="small-text" style="text-align: left; margin: 12px 0 0;">Resetting to the grid throws away the lap in progress &ndash; a lap only counts if it was flown gate to gate in one go.</p>
             </div>
-            <div class="section tuning practice-only">
+            <div class="section tuning practice-only quad-only">
                 <h2>Rates Tuning</h2>
                 <div class="rates-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
                     <div class="rate-col">
@@ -294,6 +310,8 @@
     <div id="osd" class="hidden">
         <div class="osd-element" id="osd-arm">DISARMED</div>
         <div class="osd-element" id="osd-throttle">THR: 0%</div>
+        <!-- Hummingbird only: what it is doing, and what to do next -->
+        <div class="osd-element bird-only" id="osd-bird"></div>
         <div class="osd-center-crosshair">+</div>
         <div class="osd-instructions" id="osd-instructions">Press 'Escape' to Pause | 'C' to Switch View | &uarr;&darr; Camera Uptilt | Toggle Arm Switch to Fly</div>
 
@@ -308,6 +326,6 @@
         </div>
     </div>
 
-    <script type="module" src="js/main.js?v=32"></script>
+    <script type="module" src="js/main.js?v=34"></script>
 </body>
 </html>

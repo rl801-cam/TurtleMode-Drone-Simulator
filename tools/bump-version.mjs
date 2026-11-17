@@ -3,8 +3,8 @@
 //
 // The project has no bundler, so module URLs are plain relative paths and browsers cache them
 // hard. Each one carries a `?v=N` tag that has to be bumped after any edit, and the `BUILD`
-// constant in main.js has to match so the launch menu's stamp tells the truth. That is twelve
-// places by hand, across three files, and missing one produces the worst possible failure: a page
+// constant in main.js has to match so the launch menu's stamp tells the truth. That is nineteen
+// places by hand, across six files, and missing one produces the worst possible failure: a page
 // that runs a mixture of old and new modules and looks like a bug in whatever you just changed.
 //
 // Usage:
@@ -25,7 +25,10 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 // Every file that can carry a version tag. A file with no tags is not an error - it simply has no
 // imports that need busting - but a file listed here that goes missing is.
-const FILES = ['index.html', 'js/main.js', 'js/ui.js'];
+// physics.js tags the hummingbird module and the two model files it fetches; the hummingbird's own
+// modules tag each other.
+const FILES = ['index.html', 'js/main.js', 'js/ui.js', 'js/physics.js',
+    'js/hummingbird/hummingbird.js', 'js/hummingbird/policy.js'];
 
 const TAG = /\?v=(\d+)/g;
 const BUILD = /const BUILD = 'v(\d+)';/;
