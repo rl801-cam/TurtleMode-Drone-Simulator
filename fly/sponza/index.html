@@ -249,6 +249,13 @@ if (q.get('mode') === 'survey') {
         const ray = new THREE.Ray(new THREE.Vector3(x, 1.5, 0), new THREE.Vector3(0, 0, dz));
         out[`x${x} z${dz > 0 ? '+' : '-'}`] = bvh.raycast(ray, THREE.DoubleSide).map((h) => +h.distance.toFixed(1)).sort((a2, b2) => a2 - b2).slice(0, 6);
     }
+    // Vertical sections: every surface hit going down from y = 11 (solid) and the cloth.
+    const col = {};
+    for (const z of [-8, -7, -6, -5, -4.4, -3.5, 0, 3.5, 4.4, 5, 6, 7, 8]) for (const x of [-12, -6, 0, 6, 12]) {
+        const r = new THREE.Ray(new THREE.Vector3(x, 11.2, z), new THREE.Vector3(0, -1, 0));
+        col[`x${x} z${z}`] = bvh.raycast(r, THREE.DoubleSide).map((h) => +h.point.y.toFixed(2)).sort((a2, b2) => b2 - a2).slice(0, 6);
+    }
+    out.sections = col;
     window.benchResult = { box: [box.min.toArray(), box.max.toArray()], rays: out };
     if (q.get('gates') === '1') {
         // Each gate: free distance from its centre in 16 directions across the ring (must exceed
@@ -470,7 +477,7 @@ document.body.appendChild(raceEl);
 const _raceCss = document.createElement('style');
 _raceCss.textContent = '#__r b{font:600 26px/1.1 ui-monospace,Menlo,monospace;color:#fff;font-variant-numeric:tabular-nums}';
 raceEl.id = '__r'; document.head.appendChild(_raceCss);
-const ui = new PilotUI({ input, onReset: resetDrone, onRecover: recoverDrone, onLook: nextLook, onSettings: applySettings });
+const ui = new PilotUI({ input, onReset: resetDrone, onRecover: recoverDrone, onLook: nextLook, onCamera: () => toggleCam(), onSettings: applySettings });
 // Motor sound: the main sim's synth, retuned for a whoop (tiny 0802 motors spin 25-40k rpm with
 // 4-blade 31 mm props: a whine an octave and more above a 5-inch quad). Browsers only start audio
 // after a click or key press, so the first one starts it.
@@ -487,9 +494,8 @@ whoopG.add(new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.015, 0.05), new THREE.Me
 whoopG.traverse((o) => { if (o.isMesh) o.castShadow = true; });
 scene.add(whoopG);
 whoopG.visible = camMode !== 'fpv';
-addEventListener('keydown', (e) => {
-    if (e.code === 'KeyC') { camMode = camMode === 'fpv' ? 'chase' : 'fpv'; whoopG.visible = camMode !== 'fpv'; mountCamera(); }
-});
+// Camera view toggle: bound in the pilot menu (C by default, or a switch).
+function toggleCam() { camMode = camMode === 'fpv' ? 'chase' : 'fpv'; whoopG.visible = camMode !== 'fpv'; mountCamera(); }
 
 // --- Post: scene pass, temporal AA at a reduced render scale (upscaled by TRAA's resolve) ---
 const post = new THREE.RenderPipeline(renderer);
@@ -705,7 +711,7 @@ if (mode === 'bench') {
                 + `<span>Record ${formatTime(st.recordMs)}</span>`
                 + (deltaMsg && now < deltaMsg.until ? `<i style="font:600 20px/1.2 ui-monospace,Menlo,monospace;font-style:normal;color:${deltaMsg.d <= 0 ? '#3ad16f' : '#ff5a4a'}">${fmtDelta(deltaMsg.d)}</i>` : '');
         }
-        hud.textContent = `${fps} fps  ${drops.length} drops/5s  ${q.get('q') || 'med'} ${lookName} x${preset.scale}  ${(v * 3.6).toFixed(0)} km/h  tilt ${uptilt}°\nM menu, Space reset, R recover, G look, T line, ↑↓ tilt, C camera${audio.ctx ? '' : ', click for sound'}`;
+        hud.textContent = `${fps} fps  ${drops.length} drops/5s  ${q.get('q') || 'med'} ${lookName} x${preset.scale}  ${(v * 3.6).toFixed(0)} km/h  tilt ${uptilt}°\nEsc menu, Space reset, R recover, G look, T line, ↑↓ tilt, C camera${audio.ctx ? '' : ', click for sound'}`;
         ui.setStatus(snag.hold ? '<span class="warn">TANGLED IN CLOTH</span>' : now < snag.msgUntil ? `<span class="warn">${snag.msg || 'RESET'}</span>`
             : lastArmed ? '<span class="armed">ARMED</span>' : '<span class="disarmed">DISARMED</span>');
     });

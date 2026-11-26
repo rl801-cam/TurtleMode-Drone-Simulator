@@ -337,6 +337,14 @@ export class RaceManager {
         const along = this._radial.dot(n);
         this._radial.addScaledVector(n, -along);
 
+        // Square gates (track.square): inside the frame opening, half-width `radius`, measured
+        // along the gate's own horizontal and vertical axes.
+        if (this.track && this.track.square) {
+            const ux = -n.z, uz = n.x, ul = Math.hypot(ux, uz) || 1; // horizontal across the gate
+            const across = (this._radial.x * ux + this._radial.z * uz) / ul;
+            const up = Math.sqrt(Math.max(0, this._radial.lengthSq() - across * across));
+            return Math.abs(across) <= gate.radius && up <= gate.radius ? t : null;
+        }
         return this._radial.length() <= gate.radius ? t : null;
     }
 
