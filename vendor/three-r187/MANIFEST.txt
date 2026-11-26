@@ -19,3 +19,6 @@ b1632a703206c3d830de9fcbe515696770d04b71a15ee6b50afa6d2c3298c86f  ./addons/utils
 d64be448da7631e35c8382b4b80906326613739f4891301820886bddaaf9c337  ./addons/lights/SunLightNode.js
 fd3ecd1e7d426813607f2829a1f767c0473ddbf3b3507d1cc9cca888a6839e31  ./addons/lights/SunLightShadow.js
 3e5e7f347c49f59b946b6958f2b88863fc7ee38fd6b992917f4a6c2f2190654c  ./addons/lights/SunShadowNode.js
+397ca1a38d5f31681c86705df052271eaff230b52848f768b6dd9ed482f4ae0a  ./addons/tsl/display/SMAANode.js
+b5f0f0e226065a708aa225bcaeaf0054d0872eafa3d6766b14a44308a5812c07  ./addons/tsl/display/TAAUNode.js
+c0ebc0ccd6ab51852958f2fcd5b04d99c550b016c750b87c94e96e50460f9301  ./addons/loaders/DDSLoader.js

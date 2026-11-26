@@ -42,7 +42,12 @@
 import * as THREE from 'three/webgpu';
 import { pass, mrt, output, velocity } from 'three/tsl';
 import { traa } from 'three/addons/tsl/display/TRAANode.js';
+import { taau } from 'three/addons/tsl/display/TAAUNode.js';
+import { smaa } from 'three/addons/tsl/display/SMAANode.js';
+import { fxaa } from 'three/addons/tsl/display/FXAANode.js';
+import { fsr1 } from 'three/addons/tsl/display/FSR1Node.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DDSLoader } from 'three/addons/loaders/DDSLoader.js';
 import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import { SunLight } from 'three/addons/lights/SunLight.js';
 import { SunLightNode } from 'three/addons/lights/SunLightNode.js';
@@ -59,10 +64,13 @@ THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 const q = new URLSearchParams(location.search);
 const msg = document.getElementById('msg'), hud = document.getElementById('hud');
+// Measured on the target laptop (Iris Plus G7, 1920x1200, vsync on, sustained): rendering straight
+// to the canvas with a depth pre-pass and letting the compositor upscale beats the post chain
+// (TRAA / FSR1 / TAAU each cost several ms per full-screen pass here): med 58 fps vs 31 with TRAA.
 const PRESETS = {
-    low:  { scale: 0.6,  shadow: 1024, taa: false, probes: [8, 5, 5],  cube: 16 },
-    med:  { scale: 0.8,  shadow: 2048, taa: true,  probes: [10, 7, 7], cube: 32 },
-    high: { scale: 1.0,  shadow: 4096, taa: true,  probes: [14, 8, 8], cube: 32 },
+    low:  { scale: 0.67, shadow: 2048, msaa: false, probes: [8, 5, 5],  cube: 16, post: 0, zpre: '1' },
+    med:  { scale: 0.8,  shadow: 2048, msaa: true,  probes: [10, 7, 7], cube: 32, post: 0, zpre: '1' },
+    high: { scale: 1.0,  shadow: 4096, msaa: true,  probes: [14, 8, 8], cube: 32, post: 0, zpre: '1' },
 };
 const preset = { ...PRESETS[q.get('q') || 'med'] };
 if (q.get('scale')) preset.scale = Number(q.get('scale'));
@@ -70,8 +78,7 @@ if (q.get('taa')) preset.taa = q.get('taa') === '1';
 
 if (!navigator.gpu) { msg.textContent = 'This map needs WebGPU.\nBrave on Linux: start it with\n--enable-unsafe-webgpu --enable-features=Vulkan'; throw new Error('no WebGPU'); }
 
-const renderer = new THREE.WebGPURenderer({ antialias: false, powerPreference: 'high-performance' });
-SunLight.registerNode(SunLightNode);
+const renderer = new THREE.WebGPURenderer({ antialias: q.get('msaa') != null ? q.get('msaa') === '1' : preset.msaa, powerPreference: 'high-performance', trackTimestamp: (q.get('mode') === 'bench' && q.get('ts') !== '0') || q.get('gpuTime') === '1' });
 renderer.setPixelRatio(1);
 // Bench: render at exactly ?w x ?h whatever the window is (so runs are comparable).
 const W = () => Number(q.get('w') || innerWidth), H = () => Number(q.get('h') || innerHeight);
@@ -101,6 +108,32 @@ const manager = new THREE.LoadingManager();
 manager.onProgress = (u, a, b) => { msg.textContent = `Loading Sponza… ${a}/${b}`; };
 const loader = new GLTFLoader(manager);
 const haveLocal = (await fetch(LOCAL, { method: 'HEAD' }).catch(() => null))?.ok;
+// GPU-compressed textures (tools/assets/dds_encode.py -> assets/models/sponza/dds/): each glTF
+// texture is swapped for its DXT1/DXT5 .dds at load, before anything reaches the GPU. ~50 MB of
+// texture memory instead of ~380 MB, and far less bandwidth per sample. dds=0 to compare.
+const useDDS = haveLocal && q.get('dds') !== '0' && renderer.hasFeature?.('texture-compression-bc')
+    && (await fetch('../../assets/models/sponza/dds/5823059166183034438.dds', { method: 'HEAD' }).catch(() => null))?.ok;
+const aniso = Number(q.get('aniso') || 4);
+if (useDDS) {
+    const dds = new DDSLoader(manager);
+    const WRAP = { 33071: THREE.ClampToEdgeWrapping, 33648: THREE.MirroredRepeatWrapping, 10497: THREE.RepeatWrapping };
+    loader.register((parser) => ({
+        name: 'dds-swap',
+        loadTexture(i) {
+            const json = parser.json, td = json.textures[i], uri = json.images[td.source]?.uri;
+            if (!uri) return null;
+            return dds.loadAsync('../../assets/models/sponza/dds/' + uri.replace(/\.\w+$/, '.dds')).then((t) => {
+                const sm = json.samplers?.[td.sampler] || {};
+                t.flipY = false;
+                t.wrapS = WRAP[sm.wrapS ?? 10497]; t.wrapT = WRAP[sm.wrapT ?? 10497];
+                t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter;
+                t.anisotropy = aniso;
+                parser.associations.set(t, { textures: i });
+                return t;
+            });
+        },
+    }));
+}
 const gltf = await loader.loadAsync(haveLocal ? LOCAL : REMOTE);
 const model = gltf.scene;
 const lights = [];
@@ -112,13 +145,26 @@ const box = new THREE.Box3().setFromObject(model), size = box.getSize(new THREE.
 
 // --- Sun ---
 const [sunAz, sunEl] = (q.get('sun') || '-75,60').split(',').map(Number);
-const sun = new SunLight(0xfff2dc, Number(q.get('sunI') || 100));
+// One directional light whose shadow map is fitted tightly round the atrium and rendered once:
+// the building and the sun never move, so cascades re-rendered every frame (the example's
+// SunLight) only cost time - they were the frame-time spikes. The whoop casts no shadow.
+const sunDir = new THREE.Vector3().setFromSphericalCoords(1, Math.PI / 2 - THREE.MathUtils.degToRad(sunEl), THREE.MathUtils.degToRad(sunAz));
+const sun = new THREE.DirectionalLight(0xfff2dc, Number(q.get('sunI') || 100));
+const centre = box.getCenter(new THREE.Vector3());
+sun.position.copy(centre).addScaledVector(sunDir, 60); sun.target.position.copy(centre);
+scene.add(sun, sun.target);
+sky.sunPosition.value.copy(sunDir);
 sun.castShadow = renderer.shadowMap.enabled;
-sun.shadow.camera.far = 50;
-sun.shadow.mapSize.setScalar(preset.shadow);
-sun.position.setFromSphericalCoords(1, Math.PI / 2 - THREE.MathUtils.degToRad(sunEl), THREE.MathUtils.degToRad(sunAz));
-sky.sunPosition.value.copy(sun.position);
-scene.add(sun);
+if (sun.castShadow) {
+    const sc = sun.shadow.camera, M = new THREE.Matrix4().lookAt(sun.position, centre, new THREE.Vector3(0, 1, 0)).setPosition(sun.position).invert();
+    const fit = new THREE.Box3();
+    for (let i = 0; i < 8; i++) fit.expandByPoint(new THREE.Vector3(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z).applyMatrix4(M));
+    sc.left = fit.min.x; sc.right = fit.max.x; sc.bottom = fit.min.y; sc.top = fit.max.y; sc.near = -fit.max.z - 1; sc.far = -fit.min.z + 1;
+    sc.updateProjectionMatrix();
+    sun.shadow.mapSize.setScalar(preset.shadow);
+    sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.02;
+    sun.shadow.autoUpdate = false; sun.shadow.needsUpdate = true;
+}
 
 // --- Collision: one BVH over the whole model (every surface is solid) ---
 msg.textContent = 'Building collision…';
@@ -245,14 +291,52 @@ const post = new THREE.RenderPipeline(renderer);
 let scenePass;
 function setupPost() {
     scenePass = pass(scene, camera);
-    if (preset.taa) {
+    // aa: taa (TRAA at the render scale), taau (temporal upscaling from the render scale to full
+    // resolution in one pass), smaa, fxaa, none.
+    const aa = q.get('aa') || preset.aa || (preset.taa ? 'taa' : 'none');
+    if (aa === 'taa' || aa === 'taau') {
         scenePass.setMRT(mrt({ output, velocity }));
-        post.outputNode = traa(scenePass.getTextureNode('output'), scenePass.getTextureNode('depth'), scenePass.getTextureNode('velocity'), camera);
-    } else post.outputNode = scenePass;
+        post.outputNode = (aa === 'taau' ? taau : traa)(scenePass.getTextureNode('output'), scenePass.getTextureNode('depth'), scenePass.getTextureNode('velocity'), camera);
+    } else if (aa === 'smaa') post.outputNode = smaa(scenePass);
+    else if (aa === 'fxaa') post.outputNode = fxaa(scenePass);
+    else post.outputNode = scenePass;
+    // Below full resolution, upscale with FSR1 (edge-adaptive upsample + sharpening) rather than a
+    // bilinear stretch - except after TAAU, which upscales itself.
+    const up = q.get('up') || preset.up || 'fsr';
+    if (preset.scale < 1 && aa !== 'taau' && up === 'fsr') post.outputNode = fsr1(post.outputNode, Number(q.get('sharp') ?? 0.25));
+    window.aaMode = aa + (preset.scale < 1 && aa !== 'taau' && up === 'fsr' ? '+fsr' : '');
     scenePass.setResolutionScale?.(preset.scale);
     post.needsUpdate = true;
 }
-setupPost();
+// post=0: no post chain at all. Render straight to a canvas of scale x the window and let the
+// browser's compositor stretch it (free); tone mapping happens inline in the materials.
+const DIRECT = (q.get('post') ?? preset.post) === '0' || (q.get('post') ?? preset.post) === 0;
+if (DIRECT) {
+    renderer.setPixelRatio(preset.scale);
+    renderer.setSize(W(), H(), true);
+    window.aaMode = 'direct';
+} else setupPost();
+// zpre=1: depth pre-pass (direct mode). Sponza is a few huge draw calls, so front-to-back sorting
+// can't stop the heavy PBR shader running on pixels that end up hidden; laying down depth first
+// with a trivial shader, then shading with depthFunc <= and no depth writes, shades each pixel
+// once. Alpha-tested materials (leaves, chains) skip the pre-pass and draw normally.
+const ZPRE = DIRECT && (q.get('zpre') ?? preset.zpre ?? '0') === '1';
+const depthOnly = new THREE.MeshBasicNodeMaterial({ colorWrite: false });
+const maskMeshes = [], opaqueMats = new Set();
+model.traverse((o) => { if (o.isMesh) { if (o.material.alphaTest > 0 || o.material.transparent) maskMeshes.push(o); else opaqueMats.add(o.material); } });
+if (ZPRE) for (const m of opaqueMats) { m.depthFunc = THREE.LessEqualDepth; m.depthWrite = false; }
+function drawDirect() {
+    if (!ZPRE) return renderer.render(scene, camera);
+    const vis = [sky.visible, whoopG.visible];
+    sky.visible = false; whoopG.visible = false; maskMeshes.forEach((m) => (m.visible = false));
+    scene.overrideMaterial = depthOnly;
+    renderer.render(scene, camera);
+    scene.overrideMaterial = null; [sky.visible, whoopG.visible] = vis; maskMeshes.forEach((m) => (m.visible = true));
+    renderer.autoClear = false;
+    renderer.render(scene, camera);
+    renderer.autoClear = true;
+}
+const draw = () => (DIRECT ? drawDirect() : post.render());
 addEventListener('resize', () => { if (q.get('w')) return; camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
 
 msg.classList.add('hidden');
@@ -301,25 +385,30 @@ function updateSnag(dt, now) {
 // --- Loop ---
 let lastArmed = false;
 let last = performance.now(), frames = 0, fpsT = last, fps = 0;
-const frameTimes = [];
+const frameTimes = [], gpuTimes = [];
 const mode = q.get('mode') || 'fly';
 if (mode === 'bench') {
     // Scripted: a fixed camera path round the atrium (no physics), to time rendering only.
     const N = Number(q.get('frames') || 240);
-    const path = (t) => { const ang = t * Math.PI * 2; return [Math.cos(ang) * 9, box.min.y + 1.2 + 4 * (0.5 - 0.5 * Math.cos(ang * 2)), Math.sin(ang) * 3.2]; };
+    const phase = Number(q.get('phase') || 0);
+    const path = (t) => { const ang = (t + phase) * Math.PI * 2; return [Math.cos(ang) * 9, box.min.y + 1.2 + 4 * (0.5 - 0.5 * Math.cos(ang * 2)), Math.sin(ang) * 3.2]; };
     camMode = 'free'; scene.add(camera); camera.rotation.set(0, 0, 0);
-    for (let i = 0; i < 30; i++) { post.render(); await new Promise((r) => requestAnimationFrame(r)); }
+    for (let i = 0; i < 30; i++) { draw(); await new Promise((r) => requestAnimationFrame(r)); }
     const tS = performance.now(); let prev = tS;
     for (let i = 0; i < N; i++) {
         const [x, y, z] = path(i / N), [x2, y2, z2] = path((i + 3) / N);
         camera.position.set(x, y, z); camera.lookAt(x2, y2, z2);
-        post.render();
+        draw();
         await new Promise((r) => requestAnimationFrame(r));
         const now = performance.now(); frameTimes.push(now - prev); prev = now;
+        if (renderer.backend.trackTimestamp) { const g = await renderer.resolveTimestampsAsync('render'); if (g) gpuTimes.push(g); }
     }
+    gpuTimes.sort((x, y) => x - y);
+    const gpu = gpuTimes.length ? { gpuP50: +gpuTimes[gpuTimes.length >> 1].toFixed(2), gpuP90: +gpuTimes[Math.floor(gpuTimes.length * 0.9)].toFixed(2), gpuN: gpuTimes.length } : { gpuN: 0 };
+    const spikes = frameTimes.map((t, i) => [i, Math.round(t)]).filter(([, t]) => t > 40);
     frameTimes.sort((x, y) => x - y);
     const avg = (performance.now() - tS) / N;
-    window.benchResult = { preset: q.get('q') || 'med', scale: preset.scale, w: renderer.domElement.width, h: renderer.domElement.height, fps: Math.round(1000 / avg * 10) / 10, p50: frameTimes[N >> 1].toFixed(1), p95: frameTimes[Math.floor(N * 0.95)].toFixed(1), loadMs, bvhMs, probeMs, adapter: renderer.backend.adapter?.info?.description || renderer.backend.adapter?.info?.vendor || '' };
+    window.benchResult = { preset: q.get('q') || 'med', aa: window.aaMode, ...gpu, scale: preset.scale, w: renderer.domElement.width, h: renderer.domElement.height, fps: Math.round(1000 / avg * 10) / 10, p50: frameTimes[N >> 1].toFixed(1), p95: frameTimes[Math.floor(N * 0.95)].toFixed(1), loadMs, bvhMs, probeMs, dds: !!useDDS, spikes: spikes.slice(0, 30), nSpikes: spikes.length, adapter: renderer.backend.adapter?.info?.description || renderer.backend.adapter?.info?.vendor || '' };
     hud.textContent = JSON.stringify(window.benchResult);
 } else {
     const auto = mode === 'flytest', track = []; let contacts = 0; const autoT0 = performance.now();
@@ -348,7 +437,7 @@ if (mode === 'bench') {
         physics.step(dt);
         updateSnag(dt, now);
         syncCamera(dt);
-        post.render();
+        draw();
         frames++;
         if (now - fpsT > 500) { fps = Math.round(frames * 1000 / (now - fpsT)); frames = 0; fpsT = now; }
         const v = physics.droneBody.velocity.length();

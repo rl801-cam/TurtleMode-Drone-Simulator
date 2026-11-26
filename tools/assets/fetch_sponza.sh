@@ -12,3 +12,6 @@ curl -s -A "Mozilla/5.0 (asset-fetch)" "https://api.github.com/repos/KhronosGrou
   [ -s "$OUT/$f" ] || curl -sf -A "Mozilla/5.0 (asset-fetch)" -o "$OUT/$f" "$BASE/$f"
 done
 du -sh "$OUT"
+# Optional, for speed: GPU-compressed textures (DXT1/DXT5 .dds with mips) next to the model.
+#   python3 tools/assets/dds_encode.py assets/models/sponza/dds assets/models/sponza/*.{png,jpg} --linear <non-colour maps>
+# (numpy; run where numpy is available). fly/sponza picks them up automatically.
