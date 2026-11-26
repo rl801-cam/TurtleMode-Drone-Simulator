@@ -320,6 +320,9 @@ export class RaceManager {
         // the plane to a single crossing: arriving on it counts, leaving it does not, and sitting
         // on it counts not at all.
         if ((d0 < 0) === (d1 < 0)) return null;
+        // One-way tracks (track.directional) count a gate only when flown along its normal, as
+        // tryfpv does; the default still counts it from either side.
+        if (this.track && this.track.directional && !(d0 < 0 && d1 >= 0)) return null;
 
         // Signed distances of opposite sign, so this is in (0, 1] whichever way the plane was
         // crossed and the sub-frame timing below works unchanged in both directions.
