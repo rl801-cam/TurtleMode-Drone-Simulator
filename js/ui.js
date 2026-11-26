@@ -363,6 +363,8 @@ export class UIHandler {
             // geometry and mean nothing anywhere else.
             const track = this.isRacing ? this.currentTrack : null;
             const mapChoice = track ? track.map : document.getElementById('map-choice').value;
+            // WebGPU maps are their own pages (three r187), not loaded into this r160 renderer.
+            if (mapChoice.startsWith('webgpu:')) { location.href = `fly/${mapChoice.slice(7)}/index.html`; return; }
             const originalText = this.elements.btnStart.textContent;
             this.elements.btnStart.textContent = "Loading Map...";
             this.elements.btnStart.disabled = true;

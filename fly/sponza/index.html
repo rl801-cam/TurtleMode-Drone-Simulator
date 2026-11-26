@@ -58,6 +58,7 @@ import { PhysicsEngine } from '../../js/physics.js?v=36';
 import { InputHandler } from '../../js/input.js?v=36';
 import * as CANNON from 'cannon-es';
 import { PilotUI } from './controls.js';
+import { AudioEngine } from '../../js/audio.js?v=36';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
@@ -273,6 +274,13 @@ mountCamera = function () {
 // sim's "respawn"), and out of any snag.
 function resetDrone() { physics.reset(); snag.t = 0; snag.hold = null; }
 const ui = new PilotUI({ input, onReset: resetDrone, onSettings: applySettings });
+// Motor sound: the main sim's synth, retuned for a whoop (tiny 0802 motors spin 25-40k rpm with
+// 4-blade 31 mm props: a whine an octave and more above a 5-inch quad). Browsers only start audio
+// after a click or key press, so the first one starts it.
+const audio = new AudioEngine();
+Object.assign(audio, { minFrequency: 170, maxFrequency: 640, bladeCount: 4, maxToneGain: 0.02, airReferenceSpeed: 12 });
+const startAudio = () => { if (!audio.ctx) audio.start(); };
+addEventListener('pointerdown', startAudio); addEventListener('keydown', startAudio);
 applySettings(ui.set);
 mountCamera();
 const whoop = new THREE.Mesh(new THREE.TorusGeometry(0.028, 0.006, 6, 16).rotateX(Math.PI / 2), new THREE.MeshStandardNodeMaterial({ color: 0x222222, roughness: 0.6 }));
@@ -437,11 +445,12 @@ if (mode === 'bench') {
         physics.step(dt);
         updateSnag(dt, now);
         syncCamera(dt);
+        if (audio.ctx) audio.update(axes, armed && !snag.hold, physics.droneBody.velocity.length(), camMode === 'fpv' ? 0 : 0.5);
         draw();
         frames++;
         if (now - fpsT > 500) { fps = Math.round(frames * 1000 / (now - fpsT)); frames = 0; fpsT = now; }
         const v = physics.droneBody.velocity.length();
-        hud.textContent = `${fps} fps  ${q.get('q') || 'med'} x${preset.scale}  ${(v * 3.6).toFixed(0)} km/h  tilt ${uptilt}°\nM setup · Space reset · ↑↓ tilt · C camera`;
+        hud.textContent = `${fps} fps  ${q.get('q') || 'med'} x${preset.scale}  ${(v * 3.6).toFixed(0)} km/h  tilt ${uptilt}°\nM setup · Space reset · ↑↓ tilt · C camera${audio.ctx ? '' : ' · click for sound'}`;
         ui.setStatus(snag.hold ? '<span class="warn">TANGLED IN CLOTH</span>' : now < snag.msgUntil ? '<span class="warn">RESET</span>'
             : lastArmed ? '<span class="armed">ARMED</span>' : '<span class="disarmed">DISARMED</span>');
     });
