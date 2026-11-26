@@ -84,8 +84,18 @@ renderer.setPixelRatio(1);
 // Bench: render at exactly ?w x ?h whatever the window is (so runs are comparable).
 const W = () => Number(q.get('w') || innerWidth), H = () => Number(q.get('h') || innerHeight);
 renderer.setSize(W(), H(), !q.get('w'));
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = Number(q.get('exposure') || 1.0);
+// Looks: `noon` is the original (white sun, whites near clipping); `warm` is a lower, yellower
+// late-afternoon sun with less exposure; `agx` is warm through AgX, which rolls highlights off
+// instead of clipping them. Changing look reloads (the bounce light is baked from the sun).
+const LOOKS = {
+    noon: { sunI: 100, sunC: 0xfff2dc, exp: 1.0, tm: THREE.ACESFilmicToneMapping, el: 60 },
+    warm: { sunI: 75, sunC: 0xffdcae, exp: 0.85, tm: THREE.ACESFilmicToneMapping, el: 60 },
+    agx:  { sunI: 85, sunC: 0xffdcae, exp: 1.0, tm: THREE.AgXToneMapping, el: 60 },
+};
+const lookName = LOOKS[q.get('look')] ? q.get('look') : (LOOKS[localStorage.getItem('tm.look')] ? localStorage.getItem('tm.look') : 'warm');
+const LOOK = LOOKS[lookName];
+renderer.toneMapping = LOOK.tm;
+renderer.toneMappingExposure = Number(q.get('exposure') || LOOK.exp);
 renderer.shadowMap.enabled = q.get('shadows') !== '0';
 document.body.prepend(renderer.domElement);
 await renderer.init();
@@ -118,11 +128,15 @@ const aniso = Number(q.get('aniso') || 4);
 if (useDDS) {
     const dds = new DDSLoader(manager);
     const WRAP = { 33071: THREE.ClampToEdgeWrapping, 33648: THREE.MirroredRepeatWrapping, 10497: THREE.RepeatWrapping };
+    let normalTex = null;
     loader.register((parser) => ({
         name: 'dds-swap',
         loadTexture(i) {
             const json = parser.json, td = json.textures[i], uri = json.images[td.source]?.uri;
-            if (!uri) return null;
+            // Normal maps stay uncompressed: BC1 (a colour format) breaks them - stray texels tilt
+            // far off the surface, showing as sky-blue and black specks (e.g. under the arches).
+            normalTex ??= new Set((json.materials || []).map((m) => m.normalTexture?.index).filter((x) => x !== undefined));
+            if (!uri || normalTex.has(i)) return null;
             return dds.loadAsync('../../assets/models/sponza/dds/' + uri.replace(/\.\w+$/, '.dds')).then((t) => {
                 const sm = json.samplers?.[td.sampler] || {};
                 t.flipY = false;
@@ -145,12 +159,12 @@ model.updateMatrixWorld(true);
 const box = new THREE.Box3().setFromObject(model), size = box.getSize(new THREE.Vector3());
 
 // --- Sun ---
-const [sunAz, sunEl] = (q.get('sun') || '-75,60').split(',').map(Number);
+const [sunAz, sunEl] = (q.get('sun') || `-75,${LOOK.el}`).split(',').map(Number);
 // One directional light whose shadow map is fitted tightly round the atrium and rendered once:
 // the building and the sun never move, so cascades re-rendered every frame (the example's
 // SunLight) only cost time - they were the frame-time spikes. The whoop casts no shadow.
 const sunDir = new THREE.Vector3().setFromSphericalCoords(1, Math.PI / 2 - THREE.MathUtils.degToRad(sunEl), THREE.MathUtils.degToRad(sunAz));
-const sun = new THREE.DirectionalLight(0xfff2dc, Number(q.get('sunI') || 100));
+const sun = new THREE.DirectionalLight(LOOK.sunC, Number(q.get('sunI') || LOOK.sunI));
 const centre = box.getCenter(new THREE.Vector3());
 sun.position.copy(centre).addScaledVector(sunDir, 60); sun.target.position.copy(centre);
 scene.add(sun, sun.target);
@@ -218,19 +232,57 @@ function sweep(from, to) {
     return sweepHit;
 }
 
+if (q.get('mode') === 'survey') {
+    // Debug: distances to surfaces along a few rays, to place probe volumes inside open space.
+    const out = {};
+    for (const [name, o, d] of [['+z y2', [0, 2, 0], [0, 0, 1]], ['-z y2', [0, 2, 0], [0, 0, -1]], ['+z y7', [0, 7, 0], [0, 0, 1]], ['-z y7', [0, 7, 0], [0, 0, -1]],
+        ['+x y2', [0, 2, 0], [1, 0, 0]], ['-x y2', [0, 2, 0], [-1, 0, 0]], ['up z-7', [0, 0.5, -7], [0, 1, 0]], ['up z7', [0, 0.5, 7], [0, 1, 0]],
+        ['+x z-7', [0, 2, -7], [1, 0, 0]], ['-x z-7', [0, 2, -7], [-1, 0, 0]], ['+x z7', [0, 2, 7], [1, 0, 0]], ['-x z7', [0, 2, 7], [-1, 0, 0]],
+        ['up z-7 y5', [0, 5.5, -7], [0, 1, 0]], ['+z x-12', [-12, 2, 0], [0, 0, 1]]]) {
+        const ray = new THREE.Ray(new THREE.Vector3(...o), new THREE.Vector3(...d));
+        out[name] = bvh.raycast(ray, THREE.DoubleSide).map((h) => +h.distance.toFixed(2)).sort((a2, b2) => a2 - b2).slice(0, 8);
+    }
+    for (let x = -13; x <= 13; x += 1) for (const dz of [1, -1]) {
+        const ray = new THREE.Ray(new THREE.Vector3(x, 1.5, 0), new THREE.Vector3(0, 0, dz));
+        out[`x${x} z${dz > 0 ? '+' : '-'}`] = bvh.raycast(ray, THREE.DoubleSide).map((h) => +h.distance.toFixed(1)).sort((a2, b2) => a2 - b2).slice(0, 6);
+    }
+    window.benchResult = { box: [box.min.toArray(), box.max.toArray()], rays: out };
+    throw new Error('survey done');
+}
 // --- Bounce light: probe grid baked from the scene (bounds from the three.js example) ---
 let probeMs = 0;
 if (q.get('probes') !== '0') {
     msg.textContent = 'Baking bounce light…';
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    const [nx, ny, nz] = preset.probes;
-    const probes = new LightProbeGrid(23.3, 12.8, 10.5, nx, ny, nz);
-    probes.position.set(-0.5, 6, -0.3);
-    scene.add(probes);
-    const tp = performance.now(), total = nx * ny * nz, bounces = Number(q.get('bounces') ?? 1);
+    const [nx, ny, nz] = q.get('probeN') ? q.get('probeN').split(',').map(Number) : preset.probes;
+    // Central grid: bounds from the three.js example (courtyard and galleries). The grid has no
+    // probe visibility, so probes inside walls see black and darken their neighbours: a single
+    // grid over the whole building (tried) came out darker and took 8-17 s. Instead four small
+    // grids sit inside the surrounding aisles, measured by raycasts (aisle walls at z +8.2 / -9.0,
+    // end walls at x +13.9 / -14.8, ceiling ~11 m), overlapping the central grid a little; where
+    // grids overlap the central one wins (priority). Outside every grid there is no bounce light.
+    const grids = [];
+    const addGrid = (min, max, n, priority) => {
+        const sz = new THREE.Vector3(...max).sub(new THREE.Vector3(...min));
+        const g = new LightProbeGrid(sz.x, sz.y, sz.z, ...n);
+        g.position.set((min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2);
+        g.priority = priority; scene.add(g); grids.push(g);
+    };
+    addGrid([-12.15, -0.4, -5.55], [11.15, 12.4, 4.95], [nx, ny, nz], 1);
+    if (q.get('aisles') === '1') { // off by default: +3 s bake, little gain (the aisles are enclosed and dark)
+        const k = preset.cube === 16 ? 1 : 1.5;
+        addGrid([-14.2, 0.4, 4.6], [13.3, 10.4, 7.6], [Math.round(10 * k), 5, 3], 0);
+        addGrid([-14.2, 0.4, -8.4], [13.3, 10.4, -5.2], [Math.round(10 * k), 5, 3], 0);
+        addGrid([-14.2, 0.4, -8.4], [-11.8, 10.4, 7.6], [2, 5, Math.round(6 * k)], 0);
+        addGrid([10.8, 0.4, -8.4], [13.3, 10.4, 7.6], [2, 5, Math.round(6 * k)], 0);
+    }
+    const tp = performance.now(), bounces = Number(q.get('bounces') ?? 1);
     for (let p = 0; p <= bounces; p++)
-        for (let s = 0; s < total; s += 16)
-            probes.bake(renderer, scene, { cubemapSize: preset.cube, near: 0.05, far: Math.max(size.x, size.y, size.z) * 2, start: s, count: Math.min(16, total - s), pass: p });
+        for (const g of grids) {
+            const total = g.resolution.x * g.resolution.y * g.resolution.z;
+            for (let s = 0; s < total; s += 16)
+                g.bake(renderer, scene, { cubemapSize: preset.cube, near: 0.05, far: Math.max(size.x, size.y, size.z) * 2, start: s, count: Math.min(16, total - s), pass: p });
+        }
     await renderer.backend.device?.queue.onSubmittedWorkDone?.();
     probeMs = Math.round(performance.now() - tp);
 }
@@ -241,7 +293,7 @@ physics.updateConfig({ mass: 0.032, thrustCurve: 0.5, restitution: 0.3, friction
 // Flight settings (sliders in the M panel; tiny-whoop defaults in controls.js).
 function applySettings(st) {
     physics.updateConfig({ thrust: 0.032 * 9.81 * st.twr, propPitchSpeed: st.speed,
-        rates: { roll: { center: st.center, max: st.rate, expo: st.expo }, pitch: { center: st.center, max: st.rate, expo: st.expo }, yaw: { center: st.center, max: st.yawRate, expo: st.expo } } });
+        rates: { roll: { center: st.rollCenter, max: st.rollMax, expo: st.rollExpo }, pitch: { center: st.pitchCenter, max: st.pitchMax, expo: st.pitchExpo }, yaw: { center: st.yawCenter, max: st.yawMax, expo: st.yawExpo } } });
     if (st.uptilt !== uptilt) { uptilt = st.uptilt; mountCamera?.(); }
 }
 physics.dragAreas = { x: 0.0011, y: 0.0035, z: 0.001 };
@@ -256,7 +308,7 @@ physics.collisionCallback = checkCollision;
 physics.sweepCallback = sweep;
 const spawn = (q.get('spawn') || '0,0.15,0,90').split(',').map(Number);
 // Spawn on whatever floor is under (x, z): the model's bounding box reaches below the floor.
-const floorY = (() => { _ray.origin.set(spawn[0], box.max.y - 0.5, spawn[2]); _ray.direction.set(0, -1, 0); const h = bvh.raycastFirst(_ray, THREE.DoubleSide); return h ? h.point.y : 0; })();
+const floorY = (() => { _ray.origin.set(spawn[0], box.min.y + 3.5, spawn[2]); /* below the galleries and roof */ _ray.direction.set(0, -1, 0); const h = bvh.raycastFirst(_ray, THREE.DoubleSide); return h ? h.point.y : 0; })();
 physics.setSpawn(spawn[0], floorY + spawn[1], spawn[2], spawn[3]);
 physics.reset();
 const input = new InputHandler();
@@ -272,8 +324,40 @@ mountCamera = function () {
 };
 // Reset: back to the spawn, disarmed-safe (it stays armed if the switch is armed, like a real
 // sim's "respawn"), and out of any snag.
-function resetDrone() { physics.reset(); snag.t = 0; snag.hold = null; }
-const ui = new PilotUI({ input, onReset: resetDrone, onSettings: applySettings });
+function resetDrone() { physics.reset(); snag.t = 0; snag.hold = null; safe.length = 0; }
+// Recover (tryfpv-style respawn): back to where the whoop last flew freely, dropped onto the floor
+// below that point, level, keeping its heading and staying armed. Safe points are sampled every
+// 0.25 s while clear of walls and cloth; the newest ~1 s is skipped (that's usually the crash).
+const safe = [];
+let safeT = 0;
+function trackSafe(dt) {
+    safeT += dt;
+    if (safeT < 0.25) return;
+    safeT = 0;
+    if (physics._inContact || snag.hold || snag.t > 0) return;
+    safe.push(physics.droneBody.position.clone());
+    if (safe.length > 40) safe.shift();
+}
+function recoverDrone() {
+    const b = physics.droneBody, p = safe.length > 4 ? safe[safe.length - 5] : (safe[0] || b.position);
+    _ray.origin.set(p.x, p.y + 0.05, p.z); _ray.direction.set(0, -1, 0);
+    const h = bvh.raycastFirst(_ray, THREE.DoubleSide);
+    if (!h) return resetDrone();
+    const f = new THREE.Vector3(0, 0, -1).applyQuaternion(b.quaternion), yaw = Math.atan2(-f.x, -f.z) * 180 / Math.PI;
+    const keep = { p: physics.spawn.position.clone(), q: physics.spawn.quaternion.clone() };
+    physics.setSpawn(h.point.x, h.point.y + 0.15, h.point.z, -yaw);
+    physics.reset();
+    physics.spawn.position.copy(keep.p); physics.spawn.quaternion.copy(keep.q);
+    snag.t = 0; snag.hold = null; safe.length = Math.max(0, safe.length - 5);
+    snag.msgUntil = performance.now() + 900; snag.msg = 'RECOVER';
+}
+// G cycles the lighting look; it reloads, because the bounce light is baked from the sun.
+function nextLook() {
+    const names = Object.keys(LOOKS), n = names[(names.indexOf(lookName) + 1) % names.length];
+    localStorage.setItem('tm.look', n);
+    const u = new URL(location.href); u.searchParams.delete('look'); location.href = u.href;
+}
+const ui = new PilotUI({ input, onReset: resetDrone, onRecover: recoverDrone, onLook: nextLook, onSettings: applySettings });
 // Motor sound: the main sim's synth, retuned for a whoop (tiny 0802 motors spin 25-40k rpm with
 // 4-blade 31 mm props: a whine an octave and more above a 5-inch quad). Browsers only start audio
 // after a click or key press, so the first one starts it.
@@ -329,21 +413,30 @@ if (DIRECT) {
 // with a trivial shader, then shading with depthFunc <= and no depth writes, shades each pixel
 // once. Alpha-tested materials (leaves, chains) skip the pre-pass and draw normally.
 const ZPRE = DIRECT && (q.get('zpre') ?? preset.zpre ?? '0') === '1';
-const depthOnly = new THREE.MeshBasicNodeMaterial({ colorWrite: false });
-const maskMeshes = [], opaqueMats = new Set();
-model.traverse((o) => { if (o.isMesh) { if (o.material.alphaTest > 0 || o.material.transparent) maskMeshes.push(o); else opaqueMats.add(o.material); } });
+// Pushed back a hair: the pre-pass shader's depth is not bit-identical to the PBR pass's (and MSAA
+// widens the gap at edges), so without an offset some shaded pixels fail <= and stay black.
+const depthMat = (side) => new THREE.MeshBasicNodeMaterial({ colorWrite: false, side, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2 });
+// One depth material per face-culling mode, matching each mesh's own: a front-only pre-pass misses
+// the double-sided surfaces' back faces, and whatever lies behind them then shows through
+// (light "leaking" through the arch undersides).
+const depthBySide = { [THREE.FrontSide]: depthMat(THREE.FrontSide), [THREE.BackSide]: depthMat(THREE.BackSide), [THREE.DoubleSide]: depthMat(THREE.DoubleSide) };
+const maskMeshes = [], opaqueMats = new Set(), opaqueMeshes = [];
+model.traverse((o) => { if (o.isMesh) { if (o.material.alphaTest > 0 || o.material.transparent) maskMeshes.push(o); else { opaqueMats.add(o.material); opaqueMeshes.push(o); } } });
 if (ZPRE) for (const m of opaqueMats) { m.depthFunc = THREE.LessEqualDepth; m.depthWrite = false; }
 function drawDirect() {
     if (!ZPRE) return renderer.render(scene, camera);
     const vis = [sky.visible, whoopG.visible];
     sky.visible = false; whoopG.visible = false; maskMeshes.forEach((m) => (m.visible = false));
-    scene.overrideMaterial = depthOnly;
+    for (const m of opaqueMeshes) { m.userData.mat = m.material; m.material = depthBySide[m.material.side]; }
     renderer.render(scene, camera);
-    scene.overrideMaterial = null; [sky.visible, whoopG.visible] = vis; maskMeshes.forEach((m) => (m.visible = true));
+    for (const m of opaqueMeshes) m.material = m.userData.mat; [sky.visible, whoopG.visible] = vis; maskMeshes.forEach((m) => (m.visible = true));
     renderer.autoClear = false;
     renderer.render(scene, camera);
     renderer.autoClear = true;
 }
+if (q.get('nrm')) opaqueMats.forEach((m) => { if (m.normalMap) { m.normalScale.setScalar(Number(q.get('nrm'))); if (q.get('nrm') === '0') { m.normalMap = null; } m.needsUpdate = true; } });
+if (q.get('holes') === '1') { sky.visible = false; scene.background = new THREE.Color(0xff00ff); }
+window.sides = opaqueMeshes.reduce((a, m) => ((a[m.material.side] = (a[m.material.side] || 0) + 1), a), {});
 const draw = () => (DIRECT ? drawDirect() : post.render());
 addEventListener('resize', () => { if (q.get('w')) return; camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
 
@@ -374,7 +467,7 @@ function updateSnag(dt, now) {
     const b = physics.droneBody, p = b.position;
     if (snag.hold) {
         b.position.copy(snag.hold.pos); b.velocity.set(0, 0, 0); b.angularVelocity.scale(Math.exp(-dt / 0.05), b.angularVelocity);
-        if (now > snag.hold.until) { resetDrone(); snag.msgUntil = now + 800; }
+        if (now > snag.hold.until) { resetDrone(); snag.msgUntil = now + 800; snag.msg = 'RESET'; }
         return;
     }
     if (touching(clothBVH, p, 0.06)) {
@@ -422,8 +515,24 @@ if (mode === 'bench') {
     const auto = mode === 'flytest', track = []; let contacts = 0; const autoT0 = performance.now();
     // Hover throttle for this airframe, from the thrust curve (thrust = T * mix(t, t^2, curve)).
     const hoverT = (() => { const tw = 1 / ui.set.twr, c = physics.params.thrustCurve; let lo = 0, hi = 1; for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; ((1 - c) * m + c * m * m < tw) ? lo = m : hi = m; } return lo; })();
+    // Shader warm-up: WebGPU builds a pipeline the first time each material is drawn, which stalls
+    // a frame or two - felt as stutter when new parts of the building swing into view. Draw one
+    // frame with nothing culled so everything is built before flight.
+    {
+        const culled = [];
+        scene.traverse((o) => { if (o.isMesh && o.frustumCulled) { culled.push(o); o.frustumCulled = false; } });
+        draw(); await new Promise((r) => requestAnimationFrame(r));
+        culled.forEach((o) => (o.frustumCulled = true));
+        last = performance.now(); fpsT = last;
+    }
+    // Dropped frames: a frame taking over 1.5 vsync intervals (~25 ms at 60 Hz). The fps average
+    // hides them, so the HUD counts them over the last 5 s.
+    const drops = [];
     renderer.setAnimationLoop(() => {
-        const now = performance.now(), dt = Math.min((now - last) / 1000, 0.1); last = now;
+        const now = performance.now(), dt = Math.min((now - last) / 1000, 0.1);
+        if (now - last > 25) drops.push(now);
+        while (drops.length && drops[0] < now - 5000) drops.shift();
+        last = now;
         let { axes, armed } = ui.update();
         if (snag.hold) axes = { ...axes, throttle: 0 };
         if (auto) {
@@ -435,23 +544,28 @@ if (mode === 'bench') {
             const p = physics.droneBody.position;
             track.push([+t.toFixed(2), +p.x.toFixed(2), +p.y.toFixed(2), +p.z.toFixed(2)]);
             if (physics._inContact) contacts++;
+            if (q.get('recoverAt') && t > Number(q.get('recoverAt')) && !window.recovered) {
+                const before = p.toArray().map((v) => +v.toFixed(2)); recoverDrone();
+                window.recovered = { t: +t.toFixed(2), before, after: physics.droneBody.position.toArray().map((v) => +v.toFixed(2)), safeN: safe.length };
+            }
             if (t > Number(q.get('tEnd') || 9) && !window.benchResult) {
                 const inside = box.containsPoint(new THREE.Vector3(p.x, p.y, p.z));
                 const cb = clothG.length ? new THREE.Box3().setFromBufferAttribute(BufferGeometryUtils.mergeGeometries(clothG).attributes.position) : null;
-                window.benchResult = { mode: 'flytest', inside, contacts, snagged: snagCount, cloth: cb && [cb.min.toArray().map((v) => +v.toFixed(1)), cb.max.toArray().map((v) => +v.toFixed(1))], maxY: Math.max(...track.map((r) => r[2])).toFixed(2), path: track.filter((_, i) => i % 30 === 0) };
+                window.benchResult = { mode: 'flytest', sides: window.sides, recovered: window.recovered, probeBox: window.probeBox, probeMs, inside, contacts, snagged: snagCount, cloth: cb && [cb.min.toArray().map((v) => +v.toFixed(1)), cb.max.toArray().map((v) => +v.toFixed(1))], maxY: Math.max(...track.map((r) => r[2])).toFixed(2), path: track.filter((_, i) => i % 30 === 0) };
             }
         }
         physics.setInputs(axes, armed); lastArmed = armed;
         physics.step(dt);
         updateSnag(dt, now);
+        trackSafe(dt);
         syncCamera(dt);
         if (audio.ctx) audio.update(axes, armed && !snag.hold, physics.droneBody.velocity.length(), camMode === 'fpv' ? 0 : 0.5);
         draw();
         frames++;
         if (now - fpsT > 500) { fps = Math.round(frames * 1000 / (now - fpsT)); frames = 0; fpsT = now; }
         const v = physics.droneBody.velocity.length();
-        hud.textContent = `${fps} fps  ${q.get('q') || 'med'} x${preset.scale}  ${(v * 3.6).toFixed(0)} km/h  tilt ${uptilt}°\nM setup · Space reset · ↑↓ tilt · C camera${audio.ctx ? '' : ' · click for sound'}`;
-        ui.setStatus(snag.hold ? '<span class="warn">TANGLED IN CLOTH</span>' : now < snag.msgUntil ? '<span class="warn">RESET</span>'
+        hud.textContent = `${fps} fps  ${drops.length} drops/5s  ${q.get('q') || 'med'} ${lookName} x${preset.scale}  ${(v * 3.6).toFixed(0)} km/h  tilt ${uptilt}°\nM setup, Space reset, R recover, G look, ↑↓ tilt, C camera${audio.ctx ? '' : ', click for sound'}`;
+        ui.setStatus(snag.hold ? '<span class="warn">TANGLED IN CLOTH</span>' : now < snag.msgUntil ? `<span class="warn">${snag.msg || 'RESET'}</span>`
             : lastArmed ? '<span class="armed">ARMED</span>' : '<span class="disarmed">DISARMED</span>');
     });
     window.sim = { renderer, scene, camera, physics, input, post, sun, ui, snag };

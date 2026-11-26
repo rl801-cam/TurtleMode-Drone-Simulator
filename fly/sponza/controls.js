@@ -6,6 +6,7 @@
 // *position*: the value the axis sits at when you hold the switch there, with a tolerance, so any
 // position of a three-way switch can be "armed".
 const MAP_KEY = 'tm.padmap.v2', SET_KEY = 'tm.flyset.v1';
+const SW = new Set(['arm', 'reset', 'recover']);
 
 // Flight settings with tiny-whoop defaults (1S, 65 mm, ducted, ~32 g).
 export const SETTINGS = [
@@ -19,13 +20,25 @@ export const SETTINGS = [
     ['uptilt', 'Camera uptilt, deg', 0, 50, 1, 15],
 ];
 
+// Mappings saved by the first version (tm.padmap.v1): sticks are the same; the arm switch was
+// {axis, sign, mid} (armed past the midpoint), now {axis, value, rest}. Assumes a full-throw
+// switch (the midpoint sits half a unit from both ends). No reset switch then.
+function migrateV1() {
+    const old = JSON.parse(localStorage.getItem('tm.padmap.v1') || 'null');
+    if (!old) return null;
+    const a = old.arm;
+    if (a && a.button === undefined && a.mid !== undefined) old.arm = { axis: a.axis, value: a.mid + a.sign * 0.5, rest: a.mid - a.sign * 0.5 };
+    localStorage.setItem(MAP_KEY, JSON.stringify(old));
+    return old;
+}
+
 export class PilotUI {
-    constructor({ input, onReset, onSettings }) {
-        this.input = input; this.onReset = onReset; this.onSettings = onSettings;
-        this.map = JSON.parse(localStorage.getItem(MAP_KEY) || 'null');
+    constructor({ input, onReset, onRecover, onLook, onSettings }) {
+        this.onLook = onLook; this.input = input; this.onReset = onReset; this.onRecover = onRecover; this.onSettings = onSettings;
+        this.map = JSON.parse(localStorage.getItem(MAP_KEY) || 'null') || migrateV1();
         this.set = Object.fromEntries(SETTINGS.map(([k, , , , , d]) => [k, d]));
         Object.assign(this.set, JSON.parse(localStorage.getItem(SET_KEY) || '{}'));
-        this.wiz = null; this.armed = false; this.resetActive = false; this._resetWas = false;
+        this.wiz = null; this.armed = false; this.resetActive = false; this._resetWas = false; this.recoverActive = false; this._recoverWas = false;
         this.axes = { throttle: 0, yaw: 0, pitch: 0, roll: 0 };
         this._build();
         this._keys();
@@ -47,6 +60,7 @@ export class PilotUI {
         #pilot-panel .tag { padding: 1px 6px; border-radius: 3px; }
         #pilot-panel .tag.live { background: #2fbf6a; color: #000; }
         #pilot-panel .tag.reset.live { background: #ff9f1a; }
+        #pilot-panel .tag.recover.live { background: #3fa9ff; }
         #pilot-panel button { font: inherit; margin: 6px 6px 0 0; padding: 3px 9px; }
         #pilot-panel label { display: grid; grid-template-columns: 1fr 52px; gap: 4px 8px; margin: 3px 0; }
         #pilot-panel input[type=range] { grid-column: 1 / -1; width: 100%; }
@@ -61,9 +75,9 @@ export class PilotUI {
         document.head.append(css);
         const p = document.createElement('div'); p.id = 'pilot-panel';
         p.innerHTML = `<h3>Controller</h3><div class="step"></div><div class="axes"></div>
-            <button data-a="map">Map sticks + switches</button><button data-a="skip" hidden>Skip (no reset switch)</button><button data-a="close">Close (M)</button>
+            <button data-a="map">Map sticks + switches</button><button data-a="skip" hidden>Skip</button><button data-a="close">Close (M)</button>
             <h3>Flight</h3><div class="sets"></div><button data-a="defaults">Defaults</button>
-            <h3>Keys</h3><div>Space reset · Enter arm (keyboard) · ↑↓ camera tilt · C camera · M this panel<br>Keyboard flying: W/S throttle, A/D yaw, I/K pitch, J/L roll</div>`;
+            <h3>Keys</h3><div>Space reset, R recover (nearest floor), G lighting look, Enter arm (keyboard), ↑↓ camera tilt, C camera, M this panel<br>Keyboard flying: W/S throttle, A/D yaw, I/K pitch, J/L roll</div>`;
         document.body.append(p);
         this.panel = p; this.stepEl = p.querySelector('.step'); this.axesEl = p.querySelector('.axes');
         p.querySelector('[data-a=map]').onclick = () => this.startWizard();
@@ -99,6 +113,8 @@ export class PilotUI {
         addEventListener('keydown', (e) => {
             if (e.target.closest?.('#pilot-panel')) return;
             if (e.code === 'Space') { e.preventDefault(); e.stopImmediatePropagation(); if (!e.repeat) this.onReset?.('key'); }
+            else if (e.code === 'KeyG') { e.preventDefault(); if (!e.repeat) this.onLook?.(); }
+            else if (e.code === 'KeyR') { e.preventDefault(); e.stopImmediatePropagation(); if (!e.repeat) this.onRecover?.('key'); }
             else if (e.code === 'Enter') { e.preventDefault(); if (!e.repeat) this.input.armed = !this.input.armed; }
             else if (e.code === 'ArrowUp' || e.code === 'ArrowDown') {
                 e.preventDefault(); e.stopImmediatePropagation();
@@ -122,11 +138,12 @@ export class PilotUI {
         ['roll', 'Move ROLL (right stick) fully RIGHT, then let it centre.'],
         ['arm', 'Put your ARM switch in the ARMED position and hold it there for a second…'],
         ['reset', 'Optional: put a RESET switch/button in its active position and hold a second (or Skip).'],
+        ['recover', 'Optional: put a RECOVER switch/button (respawn on the nearest floor) in its active position and hold a second (or Skip).'],
     ];
     _wizPrompt() {
         const [key, text] = PilotUI.STEPS[this.wiz.i];
-        this.stepEl.textContent = `${this.wiz.i + 1}/6  ${text}`;
-        this.panel.querySelector('[data-a=skip]').hidden = key !== 'reset';
+        this.stepEl.textContent = `${this.wiz.i + 1}/${PilotUI.STEPS.length}  ${text}`;
+        this.panel.querySelector('[data-a=skip]').hidden = key !== 'reset' && key !== 'recover';
     }
     _wizNext(g) {
         this.wiz.i++;
@@ -138,12 +155,12 @@ export class PilotUI {
     _wizDone() {
         this.map = this.wiz.map; this.wiz = null;
         localStorage.setItem(MAP_KEY, JSON.stringify(this.map));
-        this.stepEl.textContent = 'Saved. The ARM / RESET tags below light up when active.';
+        this.stepEl.textContent = 'Saved. The ARM, RESET and RECOVER tags below light up when active.';
         this.panel.querySelector('[data-a=skip]').hidden = true;
     }
     _wizTick(g) {
         const w = this.wiz, [key] = PilotUI.STEPS[w.i];
-        if (key === 'arm' || key === 'reset') {
+        if (key === 'arm' || key === 'reset' || key === 'recover') {
             // A switch position: an axis (other than the sticks) or a button that moved and stayed.
             const now = performance.now();
             let src = null;
@@ -188,6 +205,9 @@ export class PilotUI {
             this.resetActive = this._active(m.reset, g);
             if (this.resetActive && !this._resetWas) this.onReset?.('switch');
             this._resetWas = this.resetActive;
+            this.recoverActive = this._active(m.recover, g);
+            if (this.recoverActive && !this._recoverWas) this.onRecover?.('switch');
+            this._recoverWas = this.recoverActive;
         }
         this.axes = axes; this.armed = armed;
         this._draw(g);
@@ -203,16 +223,16 @@ export class PilotUI {
         if (!g) { this.axesEl.textContent = 'No controller seen yet (move a stick).'; return; }
         const m = this.map || {}, role = (k) => Object.entries(m).filter(([, s]) => s.axis === k).map(([r]) => r);
         const tag = (r) => {
-            const live = (r === 'arm' && this.armed) || (r === 'reset' && this.resetActive);
+            const live = (r === 'arm' && this.armed) || (r === 'reset' && this.resetActive) || (r === 'recover' && this.recoverActive);
             return `<span class="tag ${r} ${live ? 'live' : ''}">${r}</span>`;
         };
         let html = g.axes.map((v, k) => {
-            const roles = role(k), isSwitch = roles.some((r) => r === 'arm' || r === 'reset');
+            const roles = role(k), isSwitch = roles.some((r) => SW.has(r));
             const bar = `<div class="bar"><i style="left:${50 + Math.min(0, v) * 50}%;width:${Math.abs(v) * 50}%"></i></div>`;
-            return `<div class="ax"><span>axis ${k}</span>${bar}<span>${roles.map((r) => (r === 'arm' || r === 'reset' ? tag(r) : r)).join(' ')}</span></div>`;
+            return `<div class="ax"><span>axis ${k}</span>${bar}<span>${roles.map((r) => (SW.has(r) ? tag(r) : r)).join(' ')}</span></div>`;
         }).join('');
         const btns = Object.entries(m).filter(([, s]) => s.button !== undefined).map(([r, s]) => `button ${s.button}: ${tag(r)}`);
-        if (btns.length) html += `<div>${btns.join(' · ')}</div>`;
+        if (btns.length) html += `<div>${btns.join(', ')}</div>`;
         this.axesEl.innerHTML = html + `<div style="opacity:.6">${g.id.slice(0, 44)}</div>`;
     }
 
