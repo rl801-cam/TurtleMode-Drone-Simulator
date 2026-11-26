@@ -52,7 +52,7 @@ export class Renderer {
         this.camera = new THREE.PerspectiveCamera(this.fpvFov, window.innerWidth / window.innerHeight, 0.01, 1000);
 
         // Renderer setup
-        this.renderer = new THREE.WebGLRenderer({ 
+        this.renderer = new THREE.WebGLRenderer({
             antialias: true,
             powerPreference: 'high-performance'
         });
@@ -71,7 +71,7 @@ export class Renderer {
         this.scene.add(hemiLight);
 
         // A softer ambient light to ensure the darkest crevices still have visibility
-        const ambientLight = new THREE.AmbientLight(0xffffff, 1.0); 
+        const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
         this.scene.add(ambientLight);
 
         const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
@@ -646,8 +646,8 @@ export class Renderer {
     createPlaceholderEnvironment() {
         // Floor
         const floorGeo = new THREE.PlaneGeometry(100, 100);
-        const floorMat = new THREE.MeshStandardMaterial({ 
-            color: 0x888888, 
+        const floorMat = new THREE.MeshStandardMaterial({
+            color: 0x888888,
             roughness: 0.8,
             metalness: 0.2
         });
@@ -668,11 +668,11 @@ export class Renderer {
             const cubeGeo = new THREE.BoxGeometry(size, size, size);
             const cubeMat = new THREE.MeshStandardMaterial({ color: colors[i % colors.length] });
             const cube = new THREE.Mesh(cubeGeo, cubeMat);
-            
+
             cube.position.x = (Math.random() - 0.5) * 40;
             cube.position.z = (Math.random() - 0.5) * 40;
             cube.position.y = size / 2;
-            
+
             cube.castShadow = true;
             cube.receiveShadow = true;
             this.environmentGroup.add(cube);
@@ -749,7 +749,7 @@ export class Renderer {
             if (child.isMesh) {
                 // Ignore the drone mesh itself
                 if (child === this.droneMesh) return;
-                
+
                 child.updateMatrixWorld(true);
                 if (child.geometry && child.geometry.attributes.position) {
                     const clonedGeom = child.geometry.clone();
@@ -758,19 +758,19 @@ export class Renderer {
                 }
             }
         });
-        
+
         if (geometries.length === 0) {
             this.colliderMesh = null;
             this.collisionReady = true;
             return;
         }
-        
+
         // 2. Merge geometries into a single geometry
         const mergedGeom = BufferGeometryUtils.mergeGeometries(geometries);
-        
+
         // Dispose of cloned geometries to free memory
         geometries.forEach(g => g.dispose());
-        
+
         // 3. Build the BVH. Synchronous, and it either finishes or throws - there is no path here
         // that can leave the caller waiting on a promise that never settles.
         const t0 = performance.now();

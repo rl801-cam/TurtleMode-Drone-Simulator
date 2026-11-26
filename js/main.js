@@ -37,7 +37,7 @@ class Simulator {
         this.physics.collisionCallback = (pos, radius) => this.renderer.checkCollision(pos, radius);
         // Swept test, used only when the drone moves far enough in one sub-step to skip a surface
         this.physics.sweepCallback = (from, to) => this.renderer.sweep(from, to);
-        
+
         // Setup UI
         this.ui = new UIHandler(
             this.physics,
@@ -52,7 +52,7 @@ class Simulator {
 
         this.state = 'MENU'; // MENU, PLAYING, PAUSED
         this.lastTime = performance.now();
-        
+
         // FPS tracking
         this.fpsElement = document.getElementById('fps-counter');
         this.frames = 0;
@@ -64,15 +64,15 @@ class Simulator {
         this._nextFrameDue = 0;
         this._lastRawFrame = performance.now();
         this._displayInterval = 1000 / 60; // running estimate of the monitor's refresh interval
-        
+
         const fpsToggle = document.getElementById('fps-limit-toggle');
         const fpsValue = document.getElementById('fps-limit-value');
-        
+
         fpsToggle.addEventListener('change', (e) => {
             this.fpsLimitEnabled = e.target.checked;
             fpsValue.disabled = !this.fpsLimitEnabled;
         });
-        
+
         fpsValue.addEventListener('input', (e) => {
             this.fpsLimit = parseInt(e.target.value, 10) || 60;
         });
@@ -103,12 +103,12 @@ class Simulator {
         // Listen for ESC to pause, and R to reset
         window.addEventListener('keydown', (e) => {
             console.log("Key pressed:", e.key, "State:", this.state, "Active Element:", document.activeElement ? document.activeElement.tagName : 'none');
-            
+
             // Ignore keypresses if the user is currently typing in an input/select element
             if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'SELECT')) {
                 return;
             }
-            
+
             if (e.key === 'Escape' && this.state === 'PLAYING') {
                 this.pause();
             } else if (e.key === 'c' || e.key === 'C') {

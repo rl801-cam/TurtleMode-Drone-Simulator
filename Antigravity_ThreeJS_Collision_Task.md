@@ -25,7 +25,7 @@ To avoid the heavy overhead of a full rigid-body physics engine (like Ammo/Canno
 ### Step 2: Handle Procedural Cubes
 For the procedurally generated cubes, do not use complex triangle meshes for collision.
 1. **Mathematical Abstraction:** Create a standard Box collider geometry or calculate mathematical AABBs (Axis-Aligned Bounding Boxes).
-2. **Geometry Merging:** If the cubes are static, use `BufferGeometryUtils.mergeGeometries` to combine all cube geometries into a single mesh before generating the BVH. 
+2. **Geometry Merging:** If the cubes are static, use `BufferGeometryUtils.mergeGeometries` to combine all cube geometries into a single mesh before generating the BVH.
 3. Compute the bounds tree: `mergedCubeGeometry.computeBoundsTree()`.
 
 ### Step 3: Handle GLTF Map Collision (Default & Modded Maps)
