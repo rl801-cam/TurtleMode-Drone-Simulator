@@ -1,0 +1,17 @@
+three@0.187.0 from https://registry.npmjs.org/three/-/three-0.187.0.tgz
+tarball sha512 (npm integrity): Qiu7R+Cmh8CstZsY1uJOSWnVlfo7ZtNLV7mF8Jltk3LB3AtDu9cRZlcnRKkAk8Y4z6KKw35z7Y7Urd7jWY8etA==
+Files copied unmodified from package/build and package/examples/jsm. sha256:
+64804362f468a70d5d0283161241d85ef5c47fa1944ca916542a04217c3ebe64  ./addons/objects/SkyMesh.js
+f968f97cd733a97c51bbe3bf06c495a280be53fe0da95b5b8fd8781208447d47  ./addons/tsl/display/FSR1Node.js
+fe11c77f90f9eac220a382a6796b7ee8a49d41603c6813d9271b29dbe39469d5  ./addons/tsl/display/FXAANode.js
+c1e253f9953b90534b1604e4e8afd8a0a7f4865ecc29697068df050c2e1c25e2  ./addons/tsl/display/TRAANode.js
+f1a9b0530383c20bbeceda2c4276d6e676130ca9bea71c74a3373bf35a637bb7  ./addons/tsl/utils/TAAUtils.js
+613e370f76638fdef83926642bf256dc9615684922de1ce1f63a8583e5d78578  ./three.core.js
+d8f3cdb8b85b799a5631bd9a8d77e185d88ce1eb1bb051f48b332728a5423e3f  ./three.tsl.js
+eafead3154ec06093f3108bddceab360f048a6fcebd7c085d5aae0ab5404bd25  ./three.webgpu.js
+532ac726e120039acbcd6cf54328c57acbf7b438176afaa6951257126d11bff1  ./addons/loaders/GLTFLoader.js
+7bda2a8ba836b2bcf67cb938d4b9e1bb5d1b1bc616817103ed858c0b58296ce7  ./addons/utils/BufferGeometryUtils.js
+b1632a703206c3d830de9fcbe515696770d04b71a15ee6b50afa6d2c3298c86f  ./addons/utils/SkeletonUtils.js
+99ce7d83a8a1f5ae0188443fc915fd8dad9ef5d8f735e225bcb3ed6e2cad95d6  ./addons/lighting/LightProbeGrid.js
+11786b3ba83b0cc2d1e3e569ff40e7ba2e6709016da195d3813411eee3f2fc1d  ./addons/lighting/LightProbeGridUtils.js
+29354f1e40dde26a76d130822b6812d984d68b38f4d3b11b6c2e69f470ff10b5  ./addons/tsl/lighting/LightProbeGridNode.js
