@@ -364,7 +364,7 @@ export class PhysicsEngine {
             const contact = this._contacts[cCount++];
             contact.r.copy(s.r);
             contact.normal.set(nx, ny, nz);
-            contact.normalImpulse = 0;
+            contact.normalImpulse = 0; contact.frictionUsed = 0;
 
             let m = null;
             for (let i = 0; i < mCount; i++) {
@@ -384,7 +384,7 @@ export class PhysicsEngine {
                 m.sumR2 = 0;
                 m.count = 0;
                 m.maxDepth = 0;
-                m.normalImpulse = 0;
+                m.normalImpulse = 0; m.frictionUsed = 0;
             }
 
             m.sumN.x += nx;
@@ -408,7 +408,7 @@ export class PhysicsEngine {
             const m = this._manifolds[i];
             m.sumN.scale(1 / m.sumN.length(), m.normal);
             m.sumR.scale(1 / m.count, m.r);
-            m.normalImpulse = 0;
+            m.normalImpulse = 0; m.frictionUsed = 0;
 
             // How far the contact points are spread around their centroid (RMS). A wide patch
             // can resist tipping; a single point cannot, and gets a radius of zero.
@@ -475,8 +475,14 @@ export class PhysicsEngine {
                 const kt = this.effectiveMass(r, s.tangent);
                 if (kt <= 1e-9) continue;
 
-                // Impulse that would stop the slide outright, clamped to the friction cone
-                const jt = Math.max(-vtLen / kt, -this.params.friction * contact.normalImpulse);
+                // Impulse that would stop the slide outright, clamped to the friction cone. The
+                // cone bounds the friction applied over all solver iterations together (minus what
+                // earlier iterations used); clamping each iteration alone let 3 iterations scrub
+                // up to 3x the Coulomb limit, so landings and wall scrapes killed momentum.
+                const budget = this.params.friction * contact.normalImpulse - (contact.frictionUsed || 0);
+                if (budget <= 0) continue;
+                const jt = Math.max(-vtLen / kt, -budget);
+                contact.frictionUsed = (contact.frictionUsed || 0) - jt;
                 s.impulse.set(s.tangent.x * jt, s.tangent.y * jt, s.tangent.z * jt);
                 body.applyImpulse(s.impulse, r);
             }
