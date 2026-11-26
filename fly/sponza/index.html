@@ -613,6 +613,9 @@ if (mode === 'bench') {
         vmax: Number(q.get('vmax') || 3.6) }) : null;
     if (autolap && q.get('rec') !== 'offline') startAudio();
     if (autolap && q.get('rec')) hud.style.display = 'none';
+    // Clean plates for UI mockups: no HTML overlays (nohud=1), no path line (nopath=1).
+    if (q.get('nohud') === '1') { const st = document.createElement('style'); st.textContent = '#hud,#msg,#tt,#tt-arrow,#pilot-sticks,#pilot-cam,#pilot-status{display:none!important}'; document.head.appendChild(st); }
+    if (q.get('nopath') === '1' && tt) tt._path = () => {};
     const auto = mode === 'flytest', track = []; let contacts = 0; const autoT0 = performance.now();
     // Hover throttle for this airframe, from the thrust curve (thrust = T * mix(t, t^2, curve)).
     const hoverT = (() => { const tw = 1 / ui.set.twr, c = physics.params.thrustCurve; let lo = 0, hi = 1; for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; ((1 - c) * m + c * m * m < tw) ? lo = m : hi = m; } return lo; })();
