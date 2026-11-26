@@ -564,7 +564,7 @@ if (mode === 'bench') {
         frames++;
         if (now - fpsT > 500) { fps = Math.round(frames * 1000 / (now - fpsT)); frames = 0; fpsT = now; }
         const v = physics.droneBody.velocity.length();
-        hud.textContent = `${fps} fps  ${drops.length} drops/5s  ${q.get('q') || 'med'} ${lookName} x${preset.scale}  ${(v * 3.6).toFixed(0)} km/h  tilt ${uptilt}°\nM setup, Space reset, R recover, G look, ↑↓ tilt, C camera${audio.ctx ? '' : ', click for sound'}`;
+        hud.textContent = `${fps} fps  ${drops.length} drops/5s  ${q.get('q') || 'med'} ${lookName} x${preset.scale}  ${(v * 3.6).toFixed(0)} km/h  tilt ${uptilt}°\nM menu, Space reset, R recover, G look, ↑↓ tilt, C camera${audio.ctx ? '' : ', click for sound'}`;
         ui.setStatus(snag.hold ? '<span class="warn">TANGLED IN CLOTH</span>' : now < snag.msgUntil ? `<span class="warn">${snag.msg || 'RESET'}</span>`
             : lastArmed ? '<span class="armed">ARMED</span>' : '<span class="disarmed">DISARMED</span>');
     });
