@@ -61,7 +61,8 @@ import { PilotUI } from './controls.js';
 import { AudioEngine } from '../../js/audio.js?v=36';
 import { RaceManager } from '../../js/race.js?v=36';
 import { formatTime } from '../../js/tracks.js?v=36';
-import { SPONZA_TRACK, SPONZA_TRACK_SPAWN, SPONZA_LINE_VIA } from './track.js';
+import { SPONZA_TRACK, SPONZA_TRACK_SPAWN, withFacing, linePoints } from './track.js';
+import { TimeTrial } from './timetrial.js';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
@@ -256,35 +257,60 @@ if (q.get('mode') === 'survey') {
         col[`x${x} z${z}`] = bvh.raycast(r, THREE.DoubleSide).map((h) => +h.point.y.toFixed(2)).sort((a2, b2) => b2 - a2).slice(0, 6);
     }
     out.sections = col;
+    // First-floor gallery at y = 4.3 (floor 3.32): free distance in 6 directions from points
+    // along the galleries, counting cloth and plants as obstacles too.
+    const freeAll = (o, d) => Math.min(...[bvh, clothBVH, plantBVH].map((B) => B.raycastFirst(new THREE.Ray(o, d), THREE.DoubleSide)?.distance ?? 99));
+    const ff = {};
+    for (const [x, z] of [[0, 3.6], [0, 4.0], [0, 4.4], [-6, 4.0], [6, 4.0], [0, -4.0], [8, 0], [9, 0], [10, 0], [-9, 0], [-10, 0], [-11, 0], [9, 4.0], [-10, 4.0], [9, -4.0], [-10, -4.0], [0, 2.5], [0, -2.5], [-6, 2.5], [5, 2.5]]) {
+        const o = new THREE.Vector3(x, 4.3, z);
+        ff[`${x},${z}`] = ['+x', '-x', '+z', '-z', 'up', 'dn'].map((n, k) => `${n}:${freeAll(o, [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0], [0, -1, 0]][k].reduce((v, c, i) => (v.setComponent(i, c), v), new THREE.Vector3())).toFixed(2)}`).join(' ');
+    }
+    out.ff = ff;
+    const dn = (x, z) => +(bvh.raycastFirst(new THREE.Ray(new THREE.Vector3(x, 4.3, z), new THREE.Vector3(0, -1, 0)), THREE.DoubleSide)?.distance ?? 99).toFixed(2);
+    out.edgeZ = []; for (let z = 0; z <= 4.4; z += 0.2) out.edgeZ.push(`${z.toFixed(1)}:${dn(0, z)}`);
+    out.edgeX = []; for (let x = 4; x <= 10; x += 0.25) out.edgeX.push(`${x}:${dn(x, 0)}`);
+    out.edgeXw = []; for (let x = -12; x <= -6; x += 0.25) out.edgeXw.push(`${x}:${dn(x, 0)}`);
+    out.colRows = {};
+    for (const z of [1.6, 1.8, 2.0, 2.2, 2.4, 2.8, 3.4]) { const hits = bvh.raycast(new THREE.Ray(new THREE.Vector3(-11.4, 4.3, z), new THREE.Vector3(1, 0, 0)), THREE.DoubleSide).map((h) => +h.point.x.toFixed(2)).sort((a2, b2) => a2 - b2); out.colRows[z] = hits.slice(0, 24); }
+    out.win = {};
+    for (const x of [-7.12, -5.74, -4.17, -2.77, -1.21, 0.19, 1.74, 3.15, 4.72, 6.1]) for (const z of [1.7, -1.7]) {
+        const o = new THREE.Vector3(x, 4.5, z);
+        const up = bvh.raycastFirst(new THREE.Ray(o, new THREE.Vector3(0, 1, 0)), THREE.DoubleSide)?.distance ?? 99, dn = bvh.raycastFirst(new THREE.Ray(o, new THREE.Vector3(0, -1, 0)), THREE.DoubleSide)?.distance ?? 99;
+        const px = bvh.raycastFirst(new THREE.Ray(o, new THREE.Vector3(1, 0, 0)), THREE.DoubleSide)?.distance ?? 99, nx = bvh.raycastFirst(new THREE.Ray(o, new THREE.Vector3(-1, 0, 0)), THREE.DoubleSide)?.distance ?? 99;
+        out.win[`${x},${z}`] = `top ${(4.5 + up).toFixed(2)} sill ${(4.5 - dn).toFixed(2)} x ${(x - nx).toFixed(2)}..${(x + px).toFixed(2)}`;
+    }
+    out.sep = {};
+    for (const [x, z] of [[0, 0], [0, 2.5], [0, 4.0], [8, 0]]) out.sep[`${x},${z}`] = ['solid', 'cloth', 'plant'].map((n, k) => `${n}:dn ${[bvh, clothBVH, plantBVH][k].raycastFirst(new THREE.Ray(new THREE.Vector3(x, 4.3, z), new THREE.Vector3(0, -1, 0)), THREE.DoubleSide)?.distance?.toFixed(2)} +z ${[bvh, clothBVH, plantBVH][k].raycastFirst(new THREE.Ray(new THREE.Vector3(x, 4.3, z), new THREE.Vector3(0, 0, 1)), THREE.DoubleSide)?.distance?.toFixed(2)}`).join('  ');
     window.benchResult = { box: [box.min.toArray(), box.max.toArray()], rays: out };
     if (q.get('gates') === '1') {
-        // Each gate: free distance from its centre in 16 directions across the ring (must exceed
-        // the radius plus the whoop) and along its axis; each leg: is the straight line between
-        // consecutive gate centres clear?
-        const floorAt = (x, z) => { const r = new THREE.Ray(new THREE.Vector3(x, box.min.y + 3.5, z), new THREE.Vector3(0, -1, 0)); return bvh.raycastFirst(r, THREE.DoubleSide)?.point.y ?? 0; };
-        const G = SPONZA_TRACK.gates.map((g) => ({ ...g, p: new THREE.Vector3(g.x, floorAt(g.x, g.z) + g.h, g.z) }));
-        const free = (o, d) => bvh.raycastFirst(new THREE.Ray(o, d.clone().normalize()), THREE.DoubleSide)?.distance ?? 99;
-        const gates = G.map((g) => {
-            const yaw = THREE.MathUtils.degToRad(g.yaw), pit = THREE.MathUtils.degToRad(g.pitch || 0);
-            const n = new THREE.Vector3(Math.sin(yaw) * Math.cos(pit), Math.sin(pit), -Math.cos(yaw) * Math.cos(pit));
-            const u = new THREE.Vector3().crossVectors(n, new THREE.Vector3(0, 1, 0)); if (u.lengthSq() < 1e-6) u.set(1, 0, 0); u.normalize();
-            const v = new THREE.Vector3().crossVectors(u, n);
-            let minR = 99; for (let k = 0; k < 16; k++) { const a2 = k / 16 * Math.PI * 2; minR = Math.min(minR, free(g.p, u.clone().multiplyScalar(Math.cos(a2)).addScaledVector(v, Math.sin(a2)))); }
-            return { name: g.name, y: +g.p.y.toFixed(2), ringFree: +minR.toFixed(2), ahead: +free(g.p, n).toFixed(2), behind: +free(g.p, n.clone().negate()).toFixed(2) };
+        // Course check, counting cloth and plants as obstacles: free space round each square
+        // gate (16 directions in its plane; must exceed the half-opening plus the whoop), and
+        // the flown path - lead-in / lead-out along each gate's normal through every gate, the
+        // same curve the path-ahead line uses - sampled every 5 cm.
+        const freeAll = (o, d) => Math.min(...[bvh, clothBVH, plantBVH].filter(Boolean).map((B) => B.raycastFirst(new THREE.Ray(o, d.clone().normalize()), THREE.DoubleSide)?.distance ?? 99));
+        const G = withFacing(SPONZA_TRACK.gates).map((g) => {
+            const yaw = THREE.MathUtils.degToRad(g.yaw), pit = THREE.MathUtils.degToRad(g.pitch);
+            return { ...g, p: new THREE.Vector3(g.x, g.y, g.z), n: new THREE.Vector3(Math.sin(yaw) * Math.cos(pit), Math.sin(pit), -Math.cos(yaw) * Math.cos(pit)) };
         });
-        const legs = G.map((g, i) => { const h2 = G[(i + 1) % G.length].p, d = h2.clone().sub(g.p); const f = free(g.p, d); const hp = f < d.length() ? g.p.clone().addScaledVector(d.clone().normalize(), f) : null; return { at: hp && hp.toArray().map((v) => +v.toFixed(2)), leg: `${g.name} -> ${G[(i + 1) % G.length].name}`, len: +d.length().toFixed(2), clear: f >= d.length() ? 'yes' : `hit at ${f.toFixed(2)}` }; });
-        const chain = {};
-        for (let y = 1; y <= 11; y += 0.5) for (const dx of [1, -1]) for (const z of [0, 0.6, 1.2]) chain[`y${y} ${dx > 0 ? '+' : '-'}x z${z}`] = +free(new THREE.Vector3(0, floorAt(0, 0) + y, z), new THREE.Vector3(dx, 0, 0)).toFixed(2);
-        // The racing line: closed Catmull-Rom through gates and via points, sampled every ~10 cm.
-        const pts = []; SPONZA_TRACK.gates.forEach((g, i) => { pts.push(new THREE.Vector3(g.x, floorAt(g.x, g.z) + g.h, g.z)); for (const v of SPONZA_LINE_VIA[i] || []) pts.push(new THREE.Vector3(v.x, floorAt(v.x, v.z) + v.h, v.z)); });
-        const curve = new THREE.CatmullRomCurve3(pts, true, 'centripetal'), N = Math.ceil(curve.getLength() / 0.1);
-        const lineHits = []; let minFree = 99;
+        const gates = G.map((g) => {
+            const u = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), g.n).normalize(), v = new THREE.Vector3().crossVectors(g.n, u);
+            let minR = 99; for (let k = 0; k < 16; k++) { const a2 = k / 16 * Math.PI * 2; minR = Math.min(minR, freeAll(g.p, u.clone().multiplyScalar(Math.cos(a2)).addScaledVector(v, Math.sin(a2)))); }
+            return { name: g.name, yaw: Math.round(g.yaw), pitch: Math.round(g.pitch), planeFree: +minR.toFixed(2), ahead: +freeAll(g.p, g.n).toFixed(2), behind: +freeAll(g.p, g.n.clone().negate()).toFixed(2) };
+        });
+        const pts = linePoints(G, THREE.Vector3, (g) => g.n);
+        const curve = new THREE.CatmullRomCurve3(pts, true, 'centripetal'), N = Math.ceil(curve.getLength() / 0.05);
+        const hits = []; let minC = 99, minAt = null;
         for (let k = 0; k < N; k++) {
             const a2 = curve.getPointAt(k / N), b2 = curve.getPointAt((k + 1) / N), d = b2.clone().sub(a2);
-            if (free(a2, d) < d.length()) lineHits.push(a2.toArray().map((v) => +v.toFixed(2)));
-            for (const dir of [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0], [0, -1, 0]]) minFree = Math.min(minFree, free(a2, new THREE.Vector3(...dir)));
+            if (freeAll(a2, d) < d.length()) hits.push(a2.toArray().map((v) => +v.toFixed(2)));
+            for (const dir of [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0], [0, -1, 0]]) { const f = freeAll(a2, new THREE.Vector3(...dir)); if (f < minC) { minC = f; minAt = a2.toArray().map((v) => +v.toFixed(2)); } }
         }
-        window.benchResult = { gates, legs, line: { length: +curve.getLength().toFixed(1), hits: lineHits.slice(0, 10), nHits: lineHits.length, minClearance: +minFree.toFixed(2) } };
+        // Tightest turn: the smallest radius of curvature along the path.
+        let minRad = 99, radAt = null;
+        for (let k = 0; k < N; k += 2) { const p0 = curve.getPointAt(k / N), p1 = curve.getPointAt(((k + 4) % N) / N), p2 = curve.getPointAt(((k + 8) % N) / N);
+            const a3 = p0.distanceTo(p1), b3 = p1.distanceTo(p2), c3 = p0.distanceTo(p2), ar = new THREE.Vector3().crossVectors(p1.clone().sub(p0), p2.clone().sub(p0)).length() / 2;
+            const R = ar > 1e-6 ? (a3 * b3 * c3) / (4 * ar) : 99; if (R < minRad) { minRad = R; radAt = p1.toArray().map((v) => +v.toFixed(2)); } }
+        window.benchResult = { gates, line: { length: +curve.getLength().toFixed(1), nHits: hits.length, hits: hits.slice(0, 12), minClearance: +minC.toFixed(2), minAt, minTurnRadius: +minRad.toFixed(2), radAt } };
     }
     throw new Error('survey done');
 }
@@ -345,83 +371,21 @@ physics.contactPoints = [[-a, -a], [a, -a], [-a, a], [a, a], [0, -0.03]].map(([x
 physics.broadPhaseRadius = 0.09;
 physics.collisionCallback = checkCollision;
 physics.sweepCallback = sweep;
-// Race (time trial) on by default: spawn behind the start gate. ?race=0 for free flight.
+// Race (time trial) on by default: spawn at the start of the first-floor gallery course.
+// ?race=0 for free flight from the courtyard.
 const RACE = q.get('race') !== '0';
-const spawn = (q.get('spawn') || (RACE ? `${SPONZA_TRACK_SPAWN.x},0.15,${SPONZA_TRACK_SPAWN.z},${SPONZA_TRACK_SPAWN.yaw}` : '0,0.15,0,90')).split(',').map(Number);
-// Spawn on whatever floor is under (x, z): the model's bounding box reaches below the floor.
-const floorY = (() => { _ray.origin.set(spawn[0], box.min.y + 3.5, spawn[2]); /* below the galleries and roof */ _ray.direction.set(0, -1, 0); const h = bvh.raycastFirst(_ray, THREE.DoubleSide); return h ? h.point.y : 0; })();
+const SP = SPONZA_TRACK_SPAWN;
+const spawn = (q.get('spawn') || (RACE ? `${SP.x},0.15,${SP.z},${SP.yaw}` : '0,0.15,0,90')).split(',').map(Number);
+// Spawn on the floor under (x, z): the ground floor, or the gallery floor for the race start
+// (the ray starts just above that floor; the model's box reaches below the ground).
+const floorY = (() => { _ray.origin.set(spawn[0], RACE && !q.get('spawn') ? SP.y + 0.5 : box.min.y + 3.5, spawn[2]); _ray.direction.set(0, -1, 0); const h = bvh.raycastFirst(_ray, THREE.DoubleSide); return h ? h.point.y : 0; })();
 physics.setSpawn(spawn[0], floorY + spawn[1], spawn[2], spawn[3]);
-// --- Gates: the main sim's RaceManager (gate detection, lap timing, local leaderboard), with
-// rings and labels scaled down to whoop size. Gates are markers only: no collision.
+// --- Gates and timing: the main sim's RaceManager (gate crossing, laps, local leaderboard)
+// with square one-way gates; the time trial (gates' look, path ahead, countdown, sounds, ghost,
+// splits) is in timetrial.js.
 const race = new RaceManager({ scene });
-let raceLine = null;
-// Best lap, kept in the browser like tryfpv: the split time at every gate and the path flown
-// (drawn as an orange trail). Each gate shows the time against the best lap's split.
-const ghost = {
-    key: `tm.sponza.best.${SPONZA_TRACK.id}`, best: null, mesh: null, path: [], splits: [], lastRec: 0,
-    load() { try { this.best = JSON.parse(localStorage.getItem(this.key) || 'null'); } catch { this.best = null; } this.draw(); },
-    draw() {
-        if (this.mesh) { race.group.remove(this.mesh); this.mesh.geometry.dispose(); this.mesh = null; }
-        const p = this.best?.path; if (!p || p.length < 4) return;
-        const curve = new THREE.CatmullRomCurve3(p.map(([x, y, z]) => new THREE.Vector3(x, y, z)), false);
-        this.mesh = new THREE.Mesh(new THREE.TubeGeometry(curve, p.length * 2, 0.006, 4, false), new THREE.MeshBasicNodeMaterial({ color: 0xff8a1a, transparent: true, opacity: 0.45, depthWrite: false }));
-        race.group.add(this.mesh);
-    },
-    startLap() { this.path = []; this.splits = []; this.lastRec = 0; },
-    record(pos, lapMs) {
-        if (lapMs - this.lastRec < 40) return;
-        const l = this.path[this.path.length - 1];
-        if (l && Math.hypot(pos.x - l[0], pos.y - l[1], pos.z - l[2]) < 0.12) return;
-        this.lastRec = lapMs; this.path.push([+pos.x.toFixed(2), +pos.y.toFixed(2), +pos.z.toFixed(2)]);
-    },
-    finish(ms) {
-        if (!this.best || ms < this.best.ms) {
-            this.best = { ms, splits: this.splits.slice(), path: this.path.slice() };
-            try { localStorage.setItem(this.key, JSON.stringify(this.best)); } catch { /* full: keep in memory */ }
-            this.draw(); return true;
-        }
-        return false;
-    },
-};
-// Gate sounds: short sine blips (a gate; two notes for a lap; rising three for a best lap).
-let sfx = null;
-function blip(notes) {
-    sfx ??= audio.ctx || new (window.AudioContext || window.webkitAudioContext)();
-    const t0 = sfx.currentTime;
-    notes.forEach(([f, at, len], k) => {
-        const o = sfx.createOscillator(), g = sfx.createGain();
-        o.type = 'sine'; o.frequency.value = f;
-        g.gain.setValueAtTime(0.0001, t0 + at); g.gain.exponentialRampToValueAtTime(0.18, t0 + at + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t0 + at + len);
-        o.connect(g).connect(sfx.destination); o.start(t0 + at); o.stop(t0 + at + len + 0.02);
-    });
-}
-// T: show or hide the racing line and the best-lap trail.
-addEventListener('keydown', (e) => { if (e.code === 'KeyT' && !e.repeat && !e.target.closest?.('#pilot-panel')) { const on = !(raceLine?.visible ?? true); if (raceLine) raceLine.visible = on; if (ghost.mesh) ghost.mesh.visible = on; } });
-const fmtDelta = (d) => `${d < 0 ? '-' : '+'}${(Math.abs(d) / 1000).toFixed(2)}`;
-let deltaMsg = null;
-if (RACE) {
-    const floorAt = (x, z) => { _ray.origin.set(x, box.min.y + 3.5, z); _ray.direction.set(0, -1, 0); return bvh.raycastFirst(_ray, THREE.DoubleSide)?.point.y ?? floorY; };
-    race.setTrack({ ...SPONZA_TRACK, gates: SPONZA_TRACK.gates.map((g) => ({ ...g, y: floorAt(g.x, g.z) + g.h })) });
-    for (const g of race.gates) {
-        g.mesh.geometry.dispose();
-        g.mesh.geometry = new THREE.TorusGeometry(g.radius, 0.022, 8, 48);
-        g.label.scale.setScalar(0.32);
-        const halfH = g.radius * Math.sqrt(Math.max(0, 1 - g.normal.y * g.normal.y));
-        g.label.position.set(g.position.x, g.position.y + halfH + 0.2, g.position.z);
-        // One-way gates: a chevron under the ring points the way to fly it.
-        const chev = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.14, 3).rotateX(Math.PI / 2), new THREE.MeshBasicNodeMaterial({ color: 0x00ffcc, transparent: true, opacity: 0.8 }));
-        chev.position.copy(g.position).addScaledVector(new THREE.Vector3(0, 1, 0), -g.radius - 0.12);
-        chev.lookAt(chev.position.clone().add(g.normal));
-        race.group.add(chev);
-    }
-    // Racing line: a thin translucent tube along a closed curve through the gates (T toggles).
-    const linePts = [];
-    SPONZA_TRACK.gates.forEach((g, i) => { linePts.push(race.gates[i].position.clone()); for (const v of SPONZA_LINE_VIA[i] || []) linePts.push(new THREE.Vector3(v.x, floorAt(v.x, v.z) + v.h, v.z)); });
-    const lineCurve = new THREE.CatmullRomCurve3(linePts, true, 'centripetal');
-    raceLine = new THREE.Mesh(new THREE.TubeGeometry(lineCurve, 400, 0.008, 5, true), new THREE.MeshBasicNodeMaterial({ color: 0x00ffcc, transparent: true, opacity: 0.28, depthWrite: false }));
-    race.group.add(raceLine);
-    ghost.load();
-}
+let tt = null;
+if (RACE) race.setTrack({ ...SPONZA_TRACK, gates: withFacing(SPONZA_TRACK.gates) });
 physics.reset();
 const input = new InputHandler();
 let uptilt = 15, mountCamera = null;
@@ -436,7 +400,7 @@ mountCamera = function () {
 };
 // Reset: back to the spawn, disarmed-safe (it stays armed if the switch is armed, like a real
 // sim's "respawn"), and out of any snag.
-function resetDrone() { physics.reset(); snag.t = 0; snag.hold = null; safe.length = 0; race.resetRun(); ghost.startLap(); deltaMsg = null; }
+function resetDrone() { physics.reset(); snag.t = 0; snag.hold = null; safe.length = 0; tt?.reset(); }
 // Recover (tryfpv-style respawn): back to where the whoop last flew freely, dropped onto the floor
 // below that point, level, keeping its heading and staying armed. Safe points are sampled every
 // 0.25 s while clear of walls and cloth; the newest ~1 s is skipped (that's usually the crash).
@@ -469,14 +433,6 @@ function nextLook() {
     localStorage.setItem('tm.look', n);
     const u = new URL(location.href); u.searchParams.delete('look'); location.href = u.href;
 }
-// Race readout, top right: running lap time, lap and gate, last / best / stored record.
-const raceEl = document.createElement('div');
-raceEl.style.cssText = 'position:fixed;top:12px;right:14px;z-index:5;display:grid;gap:2px;justify-items:end;font:12px/1.35 ui-monospace,Menlo,monospace;color:#d8dde3;text-shadow:0 1px 2px #000;pointer-events:none;white-space:pre';
-raceEl.hidden = !RACE;
-document.body.appendChild(raceEl);
-const _raceCss = document.createElement('style');
-_raceCss.textContent = '#__r b{font:600 26px/1.1 ui-monospace,Menlo,monospace;color:#fff;font-variant-numeric:tabular-nums}';
-raceEl.id = '__r'; document.head.appendChild(_raceCss);
 const ui = new PilotUI({ input, onReset: resetDrone, onRecover: recoverDrone, onLook: nextLook, onCamera: () => toggleCam(), onSettings: applySettings });
 // Motor sound: the main sim's synth, retuned for a whoop (tiny 0802 motors spin 25-40k rpm with
 // 4-blade 31 mm props: a whine an octave and more above a 5-inch quad). Browsers only start audio
@@ -486,6 +442,7 @@ Object.assign(audio, { minFrequency: 170, maxFrequency: 640, bladeCount: 4, maxT
 const startAudio = () => { if (!audio.ctx) audio.start(); };
 addEventListener('pointerdown', startAudio); addEventListener('keydown', startAudio);
 applySettings(ui.set);
+if (RACE) tt = new TimeTrial({ scene, race, track: SPONZA_TRACK, camera, getAudio: () => { if (!audio.ctx) return null; if (audio.ctx.state === 'suspended') audio.ctx.resume(); return audio.ctx; } });
 mountCamera();
 const whoop = new THREE.Mesh(new THREE.TorusGeometry(0.028, 0.006, 6, 16).rotateX(Math.PI / 2), new THREE.MeshStandardNodeMaterial({ color: 0x222222, roughness: 0.6 }));
 const whoopG = new THREE.Group();
@@ -494,6 +451,26 @@ whoopG.add(new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.015, 0.05), new THREE.Me
 whoopG.traverse((o) => { if (o.isMesh) o.castShadow = true; });
 scene.add(whoopG);
 whoopG.visible = camMode !== 'fpv';
+// Auto-exposure, as an FPV camera does: brighter under a roof (galleries, arcades, bays), back
+// to the look's exposure under open sky. Ten times a second a ray goes straight up from the
+// camera and one towards the sun; the exposure eases to the target over ~0.6 s. ?ae=0 turns it off.
+const AE = q.get('ae') !== '0' && !q.get('exposure');
+const aeState = { t: 0, target: renderer.toneMappingExposure, base: renderer.toneMappingExposure };
+const _aeRay = new THREE.Ray();
+function autoExposure(dt) {
+    if (!AE) return;
+    aeState.t -= dt;
+    if (aeState.t <= 0) {
+        aeState.t = 0.1;
+        camera.getWorldPosition(_aeRay.origin);
+        _aeRay.direction.set(0, 1, 0);
+        const roofed = !!bvh.raycastFirst(_aeRay, THREE.DoubleSide);
+        _aeRay.direction.copy(sunDir);
+        const shaded = !!bvh.raycastFirst(_aeRay, THREE.DoubleSide);
+        aeState.target = aeState.base * (roofed ? 2.5 : shaded ? 1.4 : 1.0);
+    }
+    renderer.toneMappingExposure += (aeState.target - renderer.toneMappingExposure) * Math.min(1, dt / 0.6);
+}
 // Camera view toggle: bound in the pilot menu (C by default, or a switch).
 function toggleCam() { camMode = camMode === 'fpv' ? 'chase' : 'fpv'; whoopG.visible = camMode !== 'fpv'; mountCamera(); }
 
@@ -653,7 +630,7 @@ if (mode === 'bench') {
         while (drops.length && drops[0] < now - 5000) drops.shift();
         last = now;
         let { axes, armed } = ui.update();
-        if (snag.hold) axes = { ...axes, throttle: 0 };
+        if (snag.hold || tt?.holding) axes = { ...axes, throttle: 0 };
         if (auto) {
             // Scripted test flight (mode=flytest): climb, hover, fly forward into the far wall.
             const t = (now - autoT0) / 1000;
@@ -670,48 +647,22 @@ if (mode === 'bench') {
             if (t > Number(q.get('tEnd') || 9) && !window.benchResult) {
                 const inside = box.containsPoint(new THREE.Vector3(p.x, p.y, p.z));
                 const cb = clothG.length ? new THREE.Box3().setFromBufferAttribute(BufferGeometryUtils.mergeGeometries(clothG).attributes.position) : null;
-                window.benchResult = { mode: 'flytest', race: RACE && race.status(), sides: window.sides, recovered: window.recovered, probeBox: window.probeBox, probeMs, inside, contacts, snagged: snagCount, cloth: cb && [cb.min.toArray().map((v) => +v.toFixed(1)), cb.max.toArray().map((v) => +v.toFixed(1))], maxY: Math.max(...track.map((r) => r[2])).toFixed(2), path: track.filter((_, i) => i % 30 === 0) };
+                window.benchResult = { mode: 'flytest', race: RACE && { ...race.status(), stage: tt?.stage, path: window.ttPath }, sides: window.sides, recovered: window.recovered, probeBox: window.probeBox, probeMs, inside, contacts, snagged: snagCount, cloth: cb && [cb.min.toArray().map((v) => +v.toFixed(1)), cb.max.toArray().map((v) => +v.toFixed(1))], maxY: Math.max(...track.map((r) => r[2])).toFixed(2), path: track.filter((_, i) => i % 30 === 0) };
             }
         }
         physics.setInputs(axes, armed); lastArmed = armed;
         physics.step(dt);
         updateSnag(dt, now);
         trackSafe(dt);
-        if (RACE) {
-            race.update(physics.droneBody.position, dt);
-            race.animate(now);
-            if (race.state === 'RACING') ghost.record(physics.droneBody.position, race.currentLapMs);
-            for (const e of race.consumeEvents()) {
-                if (e.type === 'start') { ghost.startLap(); snag.msg = 'GO'; snag.msgUntil = now + 700; blip([[880, 0, 0.12]]); }
-                else if (e.type === 'gate') {
-                    const t = race.currentLapMs, b = ghost.best?.splits?.[ghost.splits.length];
-                    ghost.splits.push(Math.round(t));
-                    deltaMsg = b != null ? { d: t - b, until: now + 1500 } : null;
-                    blip([[1320, 0, 0.07]]);
-                } else if (e.type === 'lap') {
-                    const prevBest = ghost.best?.ms, isBest = ghost.finish(e.ms);
-                    deltaMsg = prevBest != null ? { d: e.ms - prevBest, until: now + 2500 } : null;
-                    snag.msg = `LAP ${e.lap}  ${formatTime(e.ms)}${isBest ? '  BEST' : ''}`; snag.msgUntil = now + 2500;
-                    blip(isBest ? [[988, 0, 0.1], [1319, 0.1, 0.1], [1760, 0.2, 0.18]] : [[1319, 0, 0.08], [1319, 0.12, 0.12]]);
-                    ghost.startLap();
-                }
-            }
-        }
+        tt?.update(dt, now, physics.droneBody.position, armed);
         syncCamera(dt);
+        autoExposure(dt);
         if (audio.ctx) audio.update(axes, armed && !snag.hold, physics.droneBody.velocity.length(), camMode === 'fpv' ? 0 : 0.5);
         draw();
         frames++;
         if (now - fpsT > 500) { fps = Math.round(frames * 1000 / (now - fpsT)); frames = 0; fpsT = now; }
         const v = physics.droneBody.velocity.length();
-        if (RACE) {
-            const st = race.status();
-            raceEl.innerHTML = `<b>${st.state === 'RACING' ? formatTime(st.currentMs) : 'Fly through Start'}</b>`
-                + `<span>Lap ${st.lap}   Gate ${st.nextGate}/${st.gateCount}</span>`
-                + `<span>Last ${formatTime(st.lastMs)}   Best ${formatTime(st.bestMs)}</span>`
-                + `<span>Record ${formatTime(st.recordMs)}</span>`
-                + (deltaMsg && now < deltaMsg.until ? `<i style="font:600 20px/1.2 ui-monospace,Menlo,monospace;font-style:normal;color:${deltaMsg.d <= 0 ? '#3ad16f' : '#ff5a4a'}">${fmtDelta(deltaMsg.d)}</i>` : '');
-        }
-        hud.textContent = `${fps} fps  ${drops.length} drops/5s  ${q.get('q') || 'med'} ${lookName} x${preset.scale}  ${(v * 3.6).toFixed(0)} km/h  tilt ${uptilt}°\nEsc menu, Space reset, R recover, G look, T line, ↑↓ tilt, C camera${audio.ctx ? '' : ', click for sound'}`;
+        hud.textContent = `${fps} fps  ${drops.length} drops/5s  ${q.get('q') || 'med'} ${lookName} x${preset.scale}  ${(v * 3.6).toFixed(0)} km/h  tilt ${uptilt}°\nEsc menu, Space reset, R recover, G look, ↑↓ tilt, C camera${audio.ctx ? '' : ', click for sound'}`;
         ui.setStatus(snag.hold ? '<span class="warn">TANGLED IN CLOTH</span>' : now < snag.msgUntil ? `<span class="warn">${snag.msg || 'RESET'}</span>`
             : lastArmed ? '<span class="armed">ARMED</span>' : '<span class="disarmed">DISARMED</span>');
     });

@@ -29,8 +29,8 @@ export function rateAt(x, { center, max, expo }) {
 // Flight settings with tiny-whoop defaults (1S, 65 mm, ducted, ~32 g).
 export const SETTINGS = [
     // key, label, min, max, step, default, unit
-    ['twr', 'Thrust/weight', 1.6, 5, 0.1, 2.8, ''],
-    ['speed', 'Top speed', 6, 20, 0.5, 10, 'm/s'],
+    ['twr', 'Thrust/weight', 1.6, 5, 0.1, 2.3, ''],
+    ['speed', 'Top speed', 3, 20, 0.5, 6.5, 'm/s'],
     ['uptilt', 'Camera uptilt', 0, 50, 1, 15, 'deg'],
 ];
 // Per-axis rate settings: rollCenter, rollMax, rollExpo, pitchCenter, ..., yawExpo.
@@ -53,6 +53,9 @@ function loadSettings() {
     }
     if (saved.rate !== undefined) set.rollMax = set.pitchMax = saved.rate;
     if (saved.yawRate !== undefined) set.yawMax = saved.yawRate;
+    // Earlier defaults (TWR 2.8, 10 m/s) were too quick indoors; move them over if never changed.
+    if (saved.twr === 2.8) delete saved.twr;
+    if (saved.speed === 10) delete saved.speed;
     for (const k of Object.keys(set)) if (typeof saved[k] === 'number' && Number.isFinite(saved[k])) set[k] = saved[k];
     return set;
 }
@@ -140,10 +143,13 @@ const CSS = `
 #pilot-panel button.kc:hover:not(:disabled) { background: #4c4c4c; } #pilot-panel button.kc:disabled { color: #999; cursor: default; }
 #pilot-panel button.kc.wait { background: var(--acc); color: #1a1400; border-color: var(--acc); }
 #pilot-panel tr.sel td.lab { box-shadow: inset 4px 0 0 #fff; } #pilot-panel td.lab { cursor: pointer; }
-#pilot-cam { position: fixed; left: calc(50% + 144px); bottom: 20px; width: 88px; height: 100px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; pointer-events: none;
-  border: 1px solid rgba(255,255,255,.55); border-radius: 3px; background: rgba(8,10,14,.3); color: #fff; font: 700 13px/1 system-ui, sans-serif; transform-origin: left bottom; transition: transform .15s, border-color .15s, background .15s; }
-#pilot-cam svg { width: 64px; height: 44px; } #pilot-cam .hz { stroke: rgba(255,255,255,.35); } #pilot-cam .cm { fill: #fff; stroke: none; } #pilot-cam small { font-weight: 400; font-size: 10px; color: rgba(255,255,255,.7); }
-#pilot-cam.hit { transform: scale(1.3); border-color: #ffbb00; background: rgba(40,30,0,.65); } #pilot-cam.hit .cm { fill: #ffbb00; } #pilot-cam.hit b { color: #ffbb00; }
+#pilot-cam { position: fixed; left: calc(50% + 145px); bottom: 20px; width: 100px; height: 100px; pointer-events: none;
+  border: 1px solid rgba(255,255,255,.55); border-radius: 3px; background: rgba(8,10,14,.3); color: #fff; font: 700 15px/1 system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+#pilot-cam svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+#pilot-cam .hz { stroke: rgba(255,255,255,.35); stroke-dasharray: 3 3; } #pilot-cam .q { fill: #fff; } #pilot-cam .duct { fill: none; stroke: #fff; stroke-width: 2; }
+#pilot-cam .fov { fill: rgba(255,255,255,.22); } #pilot-cam .ax { stroke: #fff; stroke-width: 1.5; } #pilot-cam .arc { fill: none; stroke: #fff; stroke-width: 1.5; }
+#pilot-cam b { position: absolute; right: 7px; top: 8px; } #pilot-cam small { position: absolute; left: 7px; top: 9px; font: 600 9px/1 system-ui, sans-serif; letter-spacing: .5px; color: rgba(255,255,255,.65); }
+#pilot-cam.hit { border-color: #ffbb00; } #pilot-cam.hit b, #pilot-cam.hit small { color: #ffbb00; } #pilot-cam.hit .ax, #pilot-cam.hit .arc { stroke: #ffbb00; } #pilot-cam.hit .fov { fill: rgba(255,187,0,.3); }
 #pilot-sticks { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); display: flex; gap: 30px; pointer-events: none; }
 #pilot-sticks .gimbal { width: 100px; height: 100px; border: 1px solid rgba(255,255,255,.55); border-radius: 3px; position: relative; background: rgba(8,10,14,.3); }
 #pilot-sticks .gimbal::before, #pilot-sticks .gimbal::after { content: ''; position: absolute; background: rgba(255,255,255,.2); }
@@ -293,18 +299,30 @@ export class PilotUI {
         document.body.append(s);
         this.dots = s.querySelectorAll('.dot');
         const cam = document.createElement('div'); cam.id = 'pilot-cam';
-        cam.innerHTML = '<svg viewBox="0 0 64 44"><line class="hz" x1="2" y1="22" x2="62" y2="22"/><g class="g"><rect class="cm" x="14" y="14" width="26" height="16" rx="2"/><path class="cm" d="M40 18 L54 11 V33 L40 26Z"/></g></svg><b>CAM 0°</b><small>uptilt</small>';
+        // Side view of the whoop (two ducts, canopy, camera at the front) with the camera's
+        // view cone drawn at the uptilt above the level line, as sims' camera-angle screens do.
+        cam.innerHTML = '<svg viewBox="0 0 100 100"><line class="hz" x1="52" y1="66" x2="96" y2="66"/>'
+            + '<path class="fov"/><line class="ax" x1="52" y1="66"/><path class="arc"/>'
+            + '<g transform="translate(52 66) scale(1.25) translate(-44 -66)"><rect class="duct" x="8" y="68" width="16" height="7" rx="2"/><rect class="duct" x="30" y="68" width="16" height="7" rx="2"/>'
+            + '<rect class="q" x="8" y="70.5" width="38" height="2"/><path class="q" d="M20 68 L24 61 H36 L40 68 Z"/><rect class="q" x="37" y="62" width="8" height="6" rx="1"/></g>'
+            + '</svg><small>CAM</small><b>0°</b>';
         document.body.append(cam); this.camEl = cam; this._camUpdate(false);
         this.status = document.createElement('div'); this.status.id = 'pilot-status'; document.body.append(this.status);
     }
 
-    // Camera angle: a small camera glyph tilted by the uptilt, enlarged for a moment when it changes.
+    // Camera angle: the view cone at the uptilt; amber for a moment when it changes.
     _camUpdate(flash) {
         const t = this.set.uptilt; this._camShown = t;
-        this.camEl.querySelector('.g').setAttribute('transform', `rotate(${-t} 27 22)`);
-        this.camEl.querySelector('b').textContent = `CAM ${Math.round(t)}°`;
+        const C = [52, 66], r = (a, L) => [C[0] + L * Math.cos(a * Math.PI / 180), C[1] - L * Math.sin(a * Math.PI / 180)];
+        const f = (p) => p.map((v) => v.toFixed(1)).join(' ');
+        const half = 22; // about half the camera's vertical view
+        this.camEl.querySelector('.fov').setAttribute('d', `M${f(C)} L${f(r(t - half, 44))} A44 44 0 0 0 ${f(r(t + half, 44))} Z`);
+        const e = r(t, 42), ax = this.camEl.querySelector('.ax'); ax.setAttribute('x2', e[0].toFixed(1)); ax.setAttribute('y2', e[1].toFixed(1));
+        this.camEl.querySelector('.arc').setAttribute('d', t > 0.5 ? `M${f(r(0, 26))} A26 26 0 0 0 ${f(r(t, 26))}` : '');
+        this.camEl.querySelector('b').textContent = `${Math.round(t)}°`;
         if (flash) { this.camEl.classList.add('hit'); clearTimeout(this._camT); this._camT = setTimeout(() => this.camEl.classList.remove('hit'), 1200); }
     }
+
     _tilt(d) {
         const v = clamp(this.set.uptilt + d, 0, 50); if (v === this.set.uptilt) return;
         this.set.uptilt = v; this._saveSet(); this._camUpdate(true);
