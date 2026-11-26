@@ -52,6 +52,7 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
 import { PhysicsEngine } from '../../js/physics.js?v=36';
 import { InputHandler } from '../../js/input.js?v=36';
 import * as CANNON from 'cannon-es';
+import { PilotUI } from './controls.js';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
@@ -122,15 +123,23 @@ scene.add(sun);
 // --- Collision: one BVH over the whole model (every surface is solid) ---
 msg.textContent = 'Building collision…';
 await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-const geoms = [];
+// Sponza's materials by index (glTF order): 14-19 are the hanging curtains and banners, 0 and 3
+// the ivy and potted plants. Those aren't solid: cloth snags the whoop (see `snag` below) and
+// leaves only drag on it. Everything else is a hard surface.
+const CLOTH = new Set([14, 15, 16, 17, 18, 19]), PLANT = new Set([0, 3]);
+const matIndex = (m) => gltf.parser.associations.get(m)?.materials;
+const geoms = [], clothG = [], plantG = [];
 model.traverse((o) => {
     if (!o.isMesh || !o.geometry.attributes.position) return;
+    const mi = matIndex(o.material), list = CLOTH.has(mi) ? clothG : PLANT.has(mi) ? plantG : geoms;
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', o.geometry.attributes.position.clone());
     if (o.geometry.index) g.setIndex(o.geometry.index.clone());
     g.applyMatrix4(o.matrixWorld);
-    geoms.push(g);
+    list.push(g);
 });
+const softBVH = (list) => { if (!list.length) return null; const m = BufferGeometryUtils.mergeGeometries(list); m.computeBoundsTree(); return m.boundsTree; };
+const clothBVH = softBVH(clothG), plantBVH = softBVH(plantG);
 const collGeom = BufferGeometryUtils.mergeGeometries(geoms);
 geoms.forEach((g) => g.dispose());
 const tb = performance.now();
@@ -181,8 +190,13 @@ if (q.get('probes') !== '0') {
 
 // --- Drone: the simulator's physics, scaled to a 1S tiny whoop (~32 g, 65 mm, ducted) ---
 const physics = new PhysicsEngine();
-physics.updateConfig({ mass: 0.032, thrust: 0.032 * 9.81 * 3.6, propPitchSpeed: 16, thrustCurve: 0.5, restitution: 0.3, friction: 0.35,
-    rates: { roll: { center: 180, max: 670 }, pitch: { center: 180, max: 670 }, yaw: { center: 180, max: 500 } } });
+physics.updateConfig({ mass: 0.032, thrustCurve: 0.5, restitution: 0.3, friction: 0.35 });
+// Flight settings (sliders in the M panel; tiny-whoop defaults in controls.js).
+function applySettings(st) {
+    physics.updateConfig({ thrust: 0.032 * 9.81 * st.twr, propPitchSpeed: st.speed,
+        rates: { roll: { center: st.center, max: st.rate, expo: st.expo }, pitch: { center: st.center, max: st.rate, expo: st.expo }, yaw: { center: st.center, max: st.yawRate, expo: st.expo } } });
+    if (st.uptilt !== uptilt) { uptilt = st.uptilt; mountCamera?.(); }
+}
 physics.dragAreas = { x: 0.0011, y: 0.0035, z: 0.001 };
 physics.rotorDrag = 0.45 * (0.032 / 0.5);
 // Ducts: contact spheres at the four duct centres plus the middle, coplanar with the CoM.
@@ -199,16 +213,21 @@ const floorY = (() => { _ray.origin.set(spawn[0], box.max.y - 0.5, spawn[2]); _r
 physics.setSpawn(spawn[0], floorY + spawn[1], spawn[2], spawn[3]);
 physics.reset();
 const input = new InputHandler();
+let uptilt = 15, mountCamera = null;
 
 // Camera: FPV on the airframe (uptilt like a whoop cam), or a chase view (C toggles).
 const rig = new THREE.Object3D(); scene.add(rig);
 const pod = new THREE.Object3D(); pod.position.set(0, 0.012, -0.02); rig.add(pod);
-let uptilt = Number(q.get('uptilt') || 15);
 let camMode = q.get('cam') || 'fpv';
-function mountCamera() {
+mountCamera = function () {
     if (camMode === 'fpv') { pod.add(camera); camera.position.set(0, 0, 0); camera.rotation.set(THREE.MathUtils.degToRad(uptilt), 0, 0); }
     else scene.add(camera);
-}
+};
+// Reset: back to the spawn, disarmed-safe (it stays armed if the switch is armed, like a real
+// sim's "respawn"), and out of any snag.
+function resetDrone() { physics.reset(); snag.t = 0; snag.hold = null; }
+const ui = new PilotUI({ input, onReset: resetDrone, onSettings: applySettings });
+applySettings(ui.set);
 mountCamera();
 const whoop = new THREE.Mesh(new THREE.TorusGeometry(0.028, 0.006, 6, 16).rotateX(Math.PI / 2), new THREE.MeshStandardNodeMaterial({ color: 0x222222, roughness: 0.6 }));
 const whoopG = new THREE.Group();
@@ -219,8 +238,6 @@ scene.add(whoopG);
 whoopG.visible = camMode !== 'fpv';
 addEventListener('keydown', (e) => {
     if (e.code === 'KeyC') { camMode = camMode === 'fpv' ? 'chase' : 'fpv'; whoopG.visible = camMode !== 'fpv'; mountCamera(); }
-    if (e.code === 'KeyR') physics.reset();
-    if (e.code === 'BracketRight' || e.code === 'BracketLeft') { uptilt += e.code === 'BracketRight' ? 5 : -5; mountCamera(); }
 });
 
 // --- Post: scene pass, temporal AA at a reduced render scale (upscaled by TRAA's resolve) ---
@@ -253,7 +270,36 @@ function syncCamera(dt) {
     }
 }
 
+// --- Cloth and leaves ---
+// Flying into a curtain or banner: the fabric wraps the ducts. Any contact drags hard on the
+// airframe (velocity and spin decay in ~0.1 s) and loads the props; a hit faster than 2.5 m/s, or
+// staying in it for 0.4 s, is a tangle: the whoop hangs in the cloth, props stalled, and resets
+// after a second. Leaves only drag (~0.35 s), and a little.
+const snag = { t: 0, hold: null, msgUntil: 0 }; let snagCount = 0;
+const _sp = new THREE.Vector3(), _st = {};
+function touching(tree, p, r) { if (!tree) return false; _sp.set(p.x, p.y, p.z); const h = tree.closestPointToPoint(_sp, _st, 0, r); return !!h && h.distance < r; }
+function updateSnag(dt, now) {
+    const b = physics.droneBody, p = b.position;
+    if (snag.hold) {
+        b.position.copy(snag.hold.pos); b.velocity.set(0, 0, 0); b.angularVelocity.scale(Math.exp(-dt / 0.05), b.angularVelocity);
+        if (now > snag.hold.until) { resetDrone(); snag.msgUntil = now + 800; }
+        return;
+    }
+    if (touching(clothBVH, p, 0.06)) {
+        const speed = b.velocity.length();
+        if (snag.t === 0 && speed > 2.5 || snag.t > 0.4) { snagCount++; snag.hold = { pos: p.clone(), until: now + 1100 }; return; }
+        snag.t += dt;
+        const k = Math.exp(-dt / 0.1);
+        b.velocity.scale(k, b.velocity); b.angularVelocity.scale(k, b.angularVelocity);
+    } else snag.t = Math.max(0, snag.t - dt * 2);
+    if (touching(plantBVH, p, 0.06)) {
+        const k = Math.exp(-dt / 0.35);
+        b.velocity.scale(k, b.velocity);
+    }
+}
+
 // --- Loop ---
+let lastArmed = false;
 let last = performance.now(), frames = 0, fpsT = last, fps = 0;
 const frameTimes = [];
 const mode = q.get('mode') || 'fly';
@@ -278,34 +324,39 @@ if (mode === 'bench') {
 } else {
     const auto = mode === 'flytest', track = []; let contacts = 0; const autoT0 = performance.now();
     // Hover throttle for this airframe, from the thrust curve (thrust = T * mix(t, t^2, curve)).
-    const hoverT = (() => { const tw = 1 / 3.6, c = physics.params.thrustCurve; let lo = 0, hi = 1; for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; ((1 - c) * m + c * m * m < tw) ? lo = m : hi = m; } return lo; })();
+    const hoverT = (() => { const tw = 1 / ui.set.twr, c = physics.params.thrustCurve; let lo = 0, hi = 1; for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; ((1 - c) * m + c * m * m < tw) ? lo = m : hi = m; } return lo; })();
     renderer.setAnimationLoop(() => {
         const now = performance.now(), dt = Math.min((now - last) / 1000, 0.1); last = now;
-        input.update();
-        let axes = input.getAxes(), armed = input.isArmed();
+        let { axes, armed } = ui.update();
+        if (snag.hold) axes = { ...axes, throttle: 0 };
         if (auto) {
             // Scripted test flight (mode=flytest): climb, hover, fly forward into the far wall.
             const t = (now - autoT0) / 1000;
             armed = t > 0.3;
-            axes = { throttle: t < 1.2 ? 0.75 : t < 2.5 ? hoverT : hoverT + 0.06, yaw: 0, pitch: t > 2.5 ? -0.18 : 0, roll: 0 };
+            const climb = Number(q.get('climb') || 1.2);
+            axes = { throttle: t < climb ? 0.75 : t < 2.5 ? hoverT : hoverT + 0.06, yaw: 0, pitch: t > 2.5 ? -0.18 : 0, roll: 0 };
             const p = physics.droneBody.position;
             track.push([+t.toFixed(2), +p.x.toFixed(2), +p.y.toFixed(2), +p.z.toFixed(2)]);
             if (physics._inContact) contacts++;
             if (t > Number(q.get('tEnd') || 9) && !window.benchResult) {
                 const inside = box.containsPoint(new THREE.Vector3(p.x, p.y, p.z));
-                window.benchResult = { mode: 'flytest', inside, contacts, maxY: Math.max(...track.map((r) => r[2])).toFixed(2), path: track.filter((_, i) => i % 30 === 0) };
+                const cb = clothG.length ? new THREE.Box3().setFromBufferAttribute(BufferGeometryUtils.mergeGeometries(clothG).attributes.position) : null;
+                window.benchResult = { mode: 'flytest', inside, contacts, snagged: snagCount, cloth: cb && [cb.min.toArray().map((v) => +v.toFixed(1)), cb.max.toArray().map((v) => +v.toFixed(1))], maxY: Math.max(...track.map((r) => r[2])).toFixed(2), path: track.filter((_, i) => i % 30 === 0) };
             }
         }
-        physics.setInputs(axes, armed);
+        physics.setInputs(axes, armed); lastArmed = armed;
         physics.step(dt);
+        updateSnag(dt, now);
         syncCamera(dt);
         post.render();
         frames++;
         if (now - fpsT > 500) { fps = Math.round(frames * 1000 / (now - fpsT)); frames = 0; fpsT = now; }
         const v = physics.droneBody.velocity.length();
-        hud.textContent = `${fps} fps  ${q.get('q') || 'med'} x${preset.scale}  ${input.isArmed() ? 'ARMED' : 'disarmed (space)'}  ${(v * 3.6).toFixed(0)} km/h\nC camera  R reset  [ ] uptilt ${uptilt}°   load ${loadMs} ms (bvh ${bvhMs}, probes ${probeMs})`;
+        hud.textContent = `${fps} fps  ${q.get('q') || 'med'} x${preset.scale}  ${(v * 3.6).toFixed(0)} km/h  tilt ${uptilt}°\nM setup · Space reset · ↑↓ tilt · C camera`;
+        ui.setStatus(snag.hold ? '<span class="warn">TANGLED IN CLOTH</span>' : now < snag.msgUntil ? '<span class="warn">RESET</span>'
+            : lastArmed ? '<span class="armed">ARMED</span>' : '<span class="disarmed">DISARMED</span>');
     });
-    window.sim = { renderer, scene, camera, physics, input, post, sun };
+    window.sim = { renderer, scene, camera, physics, input, post, sun, ui, snag };
 }
 </script>
 </body>
