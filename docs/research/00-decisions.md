@@ -13,6 +13,7 @@ Supporting reports in this folder:
 | `01-rendering.md` | Engine choice, open-world techniques, Gaussian splats, asset compression |
 | `03-landscape.md` | Competitor sims, open-source/browser sims, browser gotchas, native vs browser |
 | `04-physics.md` | Flight model, physics engine, Betaflight in wasm |
+| `07-sponza.md` | The Sponza map: perf, course, autopilot, recorder, HUD research and pitfalls |
 
 Claims in those reports come from web research by sub-agents and are tagged by confidence.
 Anything that drives a decision is re-measured here before it is relied on.
