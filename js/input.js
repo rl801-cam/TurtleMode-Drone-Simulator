@@ -14,7 +14,7 @@ function isTyping() {
 export class InputHandler {
     constructor() {
         this.gamepadIndex = null;
-        
+
         // Normalized inputs [-1, 1] for Pitch, Roll, Yaw. [0, 1] for Throttle.
         this.axes = {
             throttle: 0,
@@ -22,7 +22,7 @@ export class InputHandler {
             pitch: 0,
             roll: 0
         };
-        
+
         this.armed = false;
 
         // The hummingbird reads throttle as climb/descend with the centre holding height, so the
@@ -69,7 +69,7 @@ export class InputHandler {
                 e.gamepad.index, e.gamepad.id,
                 e.gamepad.buttons.length, e.gamepad.axes.length);
             this.gamepadIndex = e.gamepad.index;
-            
+
             // Dispatch a custom event to notify UI
             window.dispatchEvent(new CustomEvent('fpv-controller-connected', { detail: { connected: true }}));
         });
@@ -82,7 +82,7 @@ export class InputHandler {
                 window.dispatchEvent(new CustomEvent('fpv-controller-connected', { detail: { connected: false }}));
             }
         });
-        
+
         // Keyboard fallback for testing without a radio: W/S throttle, A/D yaw, I/K pitch,
         // J/L roll, space to arm. Throttle deliberately does not self-centre, matching a real
         // transmitter's ratcheted stick - except for the hummingbird, where it springs back to the
@@ -131,15 +131,15 @@ export class InputHandler {
                 // Read raw axes
                 // FPV controllers usually have 4 axes. Throttle is typically not self-centering.
                 // Depending on the OS and browser, axis indices can vary. We use mapping.
-                
+
                 let rawThrottle = gamepad.axes[this.mapping.throttle] || 0;
                 let rawYaw = gamepad.axes[this.mapping.yaw] || 0;
                 let rawPitch = gamepad.axes[this.mapping.pitch] || 0;
                 let rawRoll = gamepad.axes[this.mapping.roll] || 0;
 
-                let t = (-rawThrottle + 1) / 2; 
+                let t = (-rawThrottle + 1) / 2;
                 this.axes.throttle = this.reverse.throttle ? 1 - t : t;
-                
+
                 let y = this.reverse.yaw ? -rawYaw : rawYaw;
                 let p = this.reverse.pitch ? -rawPitch : rawPitch;
                 let r = this.reverse.roll ? -rawRoll : rawRoll;

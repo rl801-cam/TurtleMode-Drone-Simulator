@@ -40,25 +40,25 @@ export class UIHandler {
             launchMenu: document.getElementById('launch-menu'),
             pauseMenu: document.getElementById('pause-menu'),
             osd: document.getElementById('osd'),
-            
+
             btnStart: document.getElementById('btn-start'),
             btnResume: document.getElementById('btn-resume'),
             btnReset: document.getElementById('btn-reset'),
             btnExit: document.getElementById('btn-exit'),
             btnFullscreenMain: document.getElementById('btn-fullscreen-main'),
             btnFullscreenPause: document.getElementById('btn-fullscreen-pause'),
-            
+
             gpStatus: document.getElementById('gamepad-status'),
             stickLeft: document.getElementById('stick-left'),
             stickRight: document.getElementById('stick-right'),
-            
+
             bars: {
                 t: document.getElementById('bar-t'),
                 y: document.getElementById('bar-y'),
                 p: document.getElementById('bar-p'),
                 r: document.getElementById('bar-r')
             },
-            
+
             osdArm: document.getElementById('osd-arm'),
             osdThrottle: document.getElementById('osd-throttle'),
             osdBird: document.getElementById('osd-bird'),
@@ -451,10 +451,10 @@ export class UIHandler {
             console.log("toggleFullscreen called.");
             const doc = document;
             const docEl = doc.documentElement;
-            
+
             // Check cross-browser fullscreen state
             const isFS = doc.fullscreenElement || doc.webkitFullscreenElement || doc.mozFullScreenElement || doc.msFullscreenElement;
-            
+
             if (!isFS) {
                 console.log("Requesting fullscreen...");
                 const requestFS = docEl.requestFullscreen || docEl.webkitRequestFullscreen || docEl.mozRequestFullScreen || docEl.msRequestFullscreen;
@@ -741,7 +741,7 @@ export class UIHandler {
             // Map axes to visual dots (assuming mode 2: Left=Yaw/Thr, Right=Roll/Pitch)
             // axes.throttle [0, 1] -> Y axis of left stick (invert for CSS top)
             // axes.yaw [-1, 1] -> X axis of left stick
-            const ly = (1 - axes.throttle) * 100; 
+            const ly = (1 - axes.throttle) * 100;
             const lx = ((axes.yaw + 1) / 2) * 100;
             this.elements.stickLeft.style.top = `${ly}%`;
             this.elements.stickLeft.style.left = `${lx}%`;
@@ -768,7 +768,7 @@ export class UIHandler {
                 this.elements.osdArm.textContent = "DISARMED";
                 this.elements.osdArm.classList.remove('armed');
             }
-            
+
             let throttleText = `THR: ${Math.round(axes.throttle * 100)}%`;
             if (this.physics.flyingBird) {
                 const bird = this.physics.getBirdState();
