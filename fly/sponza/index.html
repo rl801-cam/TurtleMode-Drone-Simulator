@@ -63,6 +63,7 @@ import { RaceManager } from '../../js/race.js?v=36';
 import { formatTime } from '../../js/tracks.js?v=36';
 import { SPONZA_TRACK, SPONZA_TRACK_SPAWN, withFacing, linePoints } from './track.js';
 import { TimeTrial } from './timetrial.js';
+import { Autopilot } from './autopilot.js';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
@@ -608,6 +609,10 @@ if (mode === 'bench') {
     window.benchResult = { preset: q.get('q') || 'med', aa: window.aaMode, ...gpu, scale: preset.scale, w: renderer.domElement.width, h: renderer.domElement.height, fps: Math.round(1000 / avg * 10) / 10, p50: frameTimes[N >> 1].toFixed(1), p95: frameTimes[Math.floor(N * 0.95)].toFixed(1), loadMs, bvhMs, probeMs, dds: !!useDDS, spikes: spikes.slice(0, 30), nSpikes: spikes.length, adapter: renderer.backend.adapter?.info?.description || renderer.backend.adapter?.info?.vendor || '' };
     hud.textContent = JSON.stringify(window.benchResult);
 } else {
+    const autolap = mode === 'autolap' && tt ? new Autopilot({ physics, gates: withFacing(SPONZA_TRACK.gates), normalOf: (g) => race.gates[SPONZA_TRACK.gates.findIndex((x) => x.name === g.name)].normal,
+        vmax: Number(q.get('vmax') || 3.6) }) : null;
+    if (autolap && q.get('rec') !== 'offline') startAudio();
+    if (autolap && q.get('rec')) hud.style.display = 'none';
     const auto = mode === 'flytest', track = []; let contacts = 0; const autoT0 = performance.now();
     // Hover throttle for this airframe, from the thrust curve (thrust = T * mix(t, t^2, curve)).
     const hoverT = (() => { const tw = 1 / ui.set.twr, c = physics.params.thrustCurve; let lo = 0, hi = 1; for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; ((1 - c) * m + c * m * m < tw) ? lo = m : hi = m; } return lo; })();
@@ -624,13 +629,40 @@ if (mode === 'bench') {
     // Dropped frames: a frame taking over 1.5 vsync intervals (~25 ms at 60 Hz). The fps average
     // hides them, so the HUD counts them over the last 5 s.
     const drops = [];
-    renderer.setAnimationLoop(() => {
-        const now = performance.now(), dt = Math.min((now - last) / 1000, 0.1);
+    // Offline recording (mode=autolap&rec=offline): no live loop. The recorder calls recStep()
+    // once per video frame, which advances the sim by exactly 1/60 s and draws, so the video is
+    // smooth whatever this machine manages in real time. Sound is logged per frame (sticks,
+    // speed, race tones, speech) and rendered afterwards by recAudio() through an
+    // OfflineAudioContext with the same motor-sound engine.
+    const REC = q.get('rec') === 'offline' && autolap;
+    let recNow = autoT0;
+    const recLog = { frames: [], sfx: [], speech: [] };
+    const recT = () => (recNow - autoT0) / 1000;
+    if (REC && tt) {
+        for (const k of ['_tone', '_blip', '_buzz']) tt[k] = (...a) => recLog.sfx.push([recT(), k, a]);
+        window.ttSay = (text) => recLog.speech.push([recT(), text]);
+    }
+    const tick = (vnow) => {
+        const now = vnow ?? performance.now(), dt = REC ? 1 / 60 : Math.min((now - last) / 1000, 0.1);
         if (now - last > 25) drops.push(now);
         while (drops.length && drops[0] < now - 5000) drops.shift();
         last = now;
         let { axes, armed } = ui.update();
         if (snag.hold || tt?.holding) axes = { ...axes, throttle: 0 };
+        if (autolap) {
+            // Demo flight (mode=autolap): arm, wait out the countdown, then the autopilot flies
+            // the course; the result comes 3 s after the finish.
+            const t = (now - autoT0) / 1000;
+            armed = t > 1.0;
+            if (!tt || tt.stage === 'idle' || tt.stage === 'countdown') axes = { throttle: 0, yaw: 0, pitch: 0, roll: 0 };
+            else { const a = autolap.update(dt); axes = a; autolap.maxErr = Math.max(autolap.maxErr || 0, a.err); }
+            if (physics._inContact && t > 1 && tt?.stage === 'racing') contacts++;
+            if (tt?.stage === 'racing' && now - autolap.lastNow > 25) autolap.long = (autolap.long || 0) + 1; autolap.lastNow = now;
+            if (tt?.stage === 'done') autolap.doneAt ??= t;
+            if (!window.benchResult && (autolap.doneAt && t > autolap.doneAt + 3 || t > Number(q.get('tEnd') || 120))) {
+                window.benchResult = { mode: 'autolap', stage: tt?.stage, laps: tt?.lapTimes, holeshot: tt?.holeshot, maxErr: +(autolap.maxErr || 0).toFixed(2), contactFrames: contacts, snags: snagCount, t: +t.toFixed(1), fps, longFrames: autolap.long || 0 };
+            }
+        }
         if (auto) {
             // Scripted test flight (mode=flytest): climb, hover, fly forward into the far wall.
             const t = (now - autoT0) / 1000;
@@ -665,7 +697,47 @@ if (mode === 'bench') {
         hud.textContent = `${fps} fps  ${drops.length} drops/5s  ${q.get('q') || 'med'} ${lookName} x${preset.scale}  ${(v * 3.6).toFixed(0)} km/h  tilt ${uptilt}°\nEsc menu, Space reset, R recover, G look, ↑↓ tilt, C camera${audio.ctx ? '' : ', click for sound'}`;
         ui.setStatus(snag.hold ? '<span class="warn">TANGLED IN CLOTH</span>' : now < snag.msgUntil ? `<span class="warn">${snag.msg || 'RESET'}</span>`
             : lastArmed ? '<span class="armed">ARMED</span>' : '<span class="disarmed">DISARMED</span>');
-    });
+        if (REC) { recLog.frames.push([recT(), axes.throttle, axes.yaw, axes.pitch, axes.roll, armed && !snag.hold ? 1 : 0, physics.droneBody.velocity.length()]); ui.axes = axes; ui._draw(); }
+    };
+    if (REC) {
+        window.recStep = async () => {
+            recNow += 1000 / 60; tick(recNow);
+            await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+            return window.benchResult ? 1 : 0;
+        };
+        window.recSpeechLog = () => recLog.speech;
+        window.recAudio = async () => {
+            const T = recLog.frames.at(-1)[0] + 1.5, SR = 48000;
+            const off = new OfflineAudioContext(2, Math.ceil(SR * T), SR);
+            off.resume = () => Promise.resolve(); // the engine resumes "suspended" contexts
+            const A = new AudioEngine(), Live = window.AudioContext;
+            window.AudioContext = function () { return off; }; A.start(); window.AudioContext = Live;
+            const sfx = recLog.sfx.slice(); let si = 0;
+            const proto = TimeTrial.prototype, self = { getAudio: () => off };
+            const resume = OfflineAudioContext.prototype.resume;
+            const byQ = new Map();
+            for (const f of recLog.frames) { const qn = Math.max(1, Math.round(f[0] * SR / 128)); if (!byQ.has(qn)) byQ.set(qn, f); }
+            for (const [qn, f] of byQ) {
+                off.suspend(qn * 128 / SR).then(() => {
+                    A.update({ throttle: f[1], yaw: f[2], pitch: f[3], roll: f[4] }, !!f[5], f[6], 0);
+                    while (si < sfx.length && sfx[si][0] <= f[0]) { const [, k, a] = sfx[si++]; proto[k].apply(self, a); }
+                    return resume.call(off);
+                });
+            }
+            const buf = await off.startRendering();
+            // 16-bit PCM WAV, base64.
+            const n = buf.length, L = buf.getChannelData(0), R = buf.getChannelData(1), out = new DataView(new ArrayBuffer(44 + n * 4));
+            const w = (o, str) => { for (let i = 0; i < str.length; i++) out.setUint8(o + i, str.charCodeAt(i)); };
+            w(0, 'RIFF'); out.setUint32(4, 36 + n * 4, true); w(8, 'WAVEfmt '); out.setUint32(16, 16, true); out.setUint16(20, 1, true); out.setUint16(22, 2, true);
+            out.setUint32(24, SR, true); out.setUint32(28, SR * 4, true); out.setUint16(32, 4, true); out.setUint16(34, 16, true); w(36, 'data'); out.setUint32(40, n * 4, true);
+            for (let i = 0; i < n; i++) { out.setInt16(44 + i * 4, Math.max(-1, Math.min(1, L[i])) * 32767, true); out.setInt16(46 + i * 4, Math.max(-1, Math.min(1, R[i])) * 32767, true); }
+            const bytes = new Uint8Array(out.buffer); let bin = '';
+            for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+            return btoa(bin);
+        };
+        window.recSpeak = (text) => new Promise((res) => { try { const u = new SpeechSynthesisUtterance(text); u.rate = 1.1; u.onend = u.onerror = () => res(speechSynthesis.getVoices().length); speechSynthesis.speak(u); setTimeout(() => res(-1), 8000); } catch { res(-2); } });
+        window.recReady = true;
+    } else renderer.setAnimationLoop(() => tick());
     window.sim = { renderer, scene, camera, physics, input, post, sun, ui, snag };
 }
 </script>

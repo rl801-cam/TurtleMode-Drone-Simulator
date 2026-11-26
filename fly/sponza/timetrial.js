@@ -13,12 +13,14 @@
 // - Best lap stored in the browser (per track): its split at every gate and its flight path,
 //   replayed as a ghost whoop. Each gate flashes the delta to the best lap's split.
 import * as THREE from 'three/webgpu';
+import { positionView, smoothstep, float } from 'three/tsl';
 import { formatTime } from '../../js/tracks.js?v=36';
 import { linePoints, LEAD } from './track.js';
 
 const C = { next: 0xff7a00, after: 0x00d5ff, idle: 0x00d5ff, passed: 0x5a5a5a, start: 0xff2fb3, wrong: 0xff2020 };
 const secs = (ms) => (ms / 1000).toFixed(1);
 const say = (text) => {
+    if (window.ttSay) return window.ttSay(text); // recording: logged and voiced separately
     try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.rate = 1.1; speechSynthesis.speak(u); } catch { /* no speech */ }
 };
 
@@ -65,8 +67,7 @@ export class TimeTrial {
             // RaceManager orients the mesh's +Z onto the gate normal; keep the frame upright.
             const n = g.normal, up = new THREE.Vector3(0, 1, 0), x = new THREE.Vector3().crossVectors(up, n).normalize(), y = new THREE.Vector3().crossVectors(n, x);
             g.mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, n));
-            g.label.scale.setScalar(0.22);
-            g.label.position.copy(g.position).add(y.clone().multiplyScalar(half + 0.2));
+            g.label.visible = false; // no text on gates
             if (g.index === 0) {
                 const top = new THREE.Mesh(new THREE.BoxGeometry(2 * half + 2 * bar + 0.002, bar + 0.012, bar + 0.012), new THREE.MeshBasicNodeMaterial({ map: chk }));
                 top.position.set(0, o, 0); g.mesh.add(top);
@@ -87,7 +88,6 @@ export class TimeTrial {
             else if (g.index === 0) { col = C.start; op = 0.7; }
             else { col = C.idle; op = 0.25; }
             m.color.setHex(col); m.opacity = op; g.mesh.scale.setScalar(s);
-            g.label.material.opacity = g.index === n ? 1 : 0.3;
         }
     }
 
@@ -109,7 +109,10 @@ export class TimeTrial {
         if (!started) pts[0].lerp(pts[1], 0.35);
         const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
         this.pathMesh = new THREE.Mesh(new THREE.TubeGeometry(curve, 120, 0.009, 5, false),
-            new THREE.MeshBasicNodeMaterial({ color: 0xffa040, transparent: true, opacity: 0.4, depthWrite: false }));
+            this._pathMat ??= Object.assign(new THREE.MeshBasicNodeMaterial({ color: 0xffa040, transparent: true, depthWrite: false }),
+                // Faded out within a metre of the camera: you fly along the line, and close up the
+                // thin tube would fill the view.
+                { opacityNode: float(0.45).mul(smoothstep(0.35, 1.2, positionView.length())) }));
         this.group.add(this.pathMesh);
     }
 
